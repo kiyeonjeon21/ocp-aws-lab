@@ -14,6 +14,7 @@ AWS 위에 **OpenShift Container Platform(OCP)** 클러스터를 IPI 방식으�
 
 ## 목차
 
+- [구조 다이어그램](#구조-다이어그램)
 - [사전 준비](#사전-준비)
 - [빠른 시작](#빠른-시작)
 - [프로파일](#프로파일)
@@ -23,6 +24,42 @@ AWS 위에 **OpenShift Container Platform(OCP)** 클러스터를 IPI 방식으�
 - [트러블슈팅](#트러블슈팅)
 - [디렉토리 구조](#디렉토리-구조)
 - [참고 링크](#참고-링크)
+
+---
+
+## 구조 다이어그램
+
+`minimal` 프로파일로 실제 설치했던 클러스터(`lab1-k6s9t`)를 그린 것입니다.
+모든 리소스 ID, CIDR, 포트는 CloudTrail과 설치 로그에서 뽑은 실측값입니다.
+
+| 다이어그램 | 무엇을 보여주나 |
+|---|---|
+| [인프라 배치](https://app.excalidraw.com/s/AU3bkHPBsIE/8sxxVui6XVZ) | VPC, 서브넷, 노드, 로드밸런서, Route 53이 어디에 놓이는지 |
+| [트래픽 경로](https://app.excalidraw.com/s/AU3bkHPBsIE/4Gq0Sr9Nsfe) | `oc` 호출, 웹 콘솔, 내부 통신, 아웃바운드 네 갈래 |
+| [OCP 논리 구조](https://app.excalidraw.com/s/AU3bkHPBsIE/ApRyIg8PYAP) | AWS를 걷어낸 컨트롤 플레인, 워커, 네트워크 3계층, Machine API |
+| [설치·삭제 라이프사이클](https://app.excalidraw.com/s/AU3bkHPBsIE/1FzEkpAa0dX) | 46분 동안 무슨 순서로 생기고 어떻게 사라지는지 |
+| [AWS 리소스 전체 인벤토리](https://app.excalidraw.com/s/AU3bkHPBsIE/60CwgVQ29If) | 생성되는 리소스 전부와 과금 대상 구분 |
+
+그림을 보면 알게 되는 것들입니다.
+
+**`api.<cluster>.<baseDomain>`이 조회 위치에 따라 다른 곳을 가리킵니다.**
+VPC 밖에서는 퍼블릭 존이 답해 외부 NLB로 가고, VPC 안에서는 프라이빗 존이 답해 내부 NLB로 갑니다.
+같은 이름인데 목적지가 다릅니다.
+
+**로드밸런서 3개 중 하나는 인스톨러가 만든 게 아닙니다.**
+NLB 2개는 설치 과정에서 생기지만, `*.apps`가 물린 Classic ELB는 설치가 끝난 뒤 Ingress Operator가 Service type=LoadBalancer로 만듭니다.
+`verify-clean.sh`가 Classic ELB를 별도로 검사하는 이유입니다.
+
+**아웃바운드 경로가 두 개입니다.**
+일반 트래픽은 NAT Gateway를 타지만, S3 행 트래픽은 게이트웨이 VPC 엔드포인트로 빠져서 NAT 데이터 요금($0.045/GB)을 내지 않습니다.
+
+**과금 대상은 네 가지뿐입니다.**
+EC2, NAT Gateway, 로드밸런서, EBS입니다.
+VPC, 서브넷, IGW, 라우트 테이블, 보안그룹, IAM 롤은 개수가 많아도 전부 무료입니다.
+
+> 다이어그램은 `lab1-k6s9t` 스냅샷입니다.
+> destroy 후 재설치하면 구조는 같지만 리소스 ID는 전부 바뀝니다.
+> 링크는 Excalidraw 워크스페이스 권한이 필요합니다.
 
 ---
 
@@ -246,12 +283,22 @@ aws ec2 describe-addresses --region $REGION             # 미사용 EIP도 과�
 aws route53 list-resource-record-sets --hosted-zone-id $ZONE_ID
 
 # 아래 세 가지는 자주 누락되지만 실제로 남습니다
-aws s3api list-buckets --query "Buckets[?contains(Name,'$INFRA_ID')]"   # 부트스트랩 ignition 버킷
+aws s3api list-buckets --query "Buckets[?contains(Name,'$INFRA_ID')]"   # 버킷 2종 (아래 참고)
 aws route53 list-hosted-zones \
   --query "HostedZones[?Config.PrivateZone==\`true\`]"                  # 프라이빗 존, 개당 월 \$0.50
 aws iam list-roles  --query "Roles[?contains(RoleName,'$INFRA_ID')]"    # 과금은 없지만 계정이 지저분해집니다
-aws iam list-users  --query "Users[?contains(UserName,'$INFRA_ID')]"
+aws iam list-users  --query "Users[?contains(UserName,'$INFRA_ID')]"    # 4.22 기준 0개. 구버전 대비 방어용
 ```
+
+S3 버킷은 두 종류가 만들어집니다.
+용도가 달라서 남는 이유도 다릅니다.
+
+| 버킷 | 용도 | 언제 사라지나 |
+|---|---|---|
+| `openshift-bootstrap-data-<infraID>` | 부트스트랩 ignition 전달 | 부트스트랩 완료 시점에 설치 프로그램이 삭제 |
+| `<infraID>-image-registry-<region>` | 내부 이미지 레지스트리 백엔드 | `destroy` 때 삭제. 이미지를 push했다면 용량만큼 과금됨 |
+
+설치가 중간에 실패하면 첫 번째 버킷이 남아 재설치를 방해할 수 있습니다.
 
 ### 안전장치 권장
 

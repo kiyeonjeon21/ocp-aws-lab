@@ -2,6 +2,7 @@
 .env
 secrets/*
 !secrets/.gitkeep
+.mcp.json
 
 # 클러스터 상태 (metadata.json 포함 - 절대 커밋하지 말 것, 절대 지우지도 말 것)
 clusters/*
@@ -17,3 +18,4 @@ id_ocp_lab.pub
 
 # OS
 .DS_Store
+
