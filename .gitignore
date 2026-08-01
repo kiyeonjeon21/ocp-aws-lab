@@ -1,0 +1,19 @@
+# 자격증명 / 시크릿
+.env
+secrets/*
+!secrets/.gitkeep
+
+# 클러스터 상태 (metadata.json 포함 - 절대 커밋하지 말 것, 절대 지우지도 말 것)
+clusters/*
+!clusters/.gitkeep
+
+# 로컬 바이너리
+bin/
+
+# SSH 키
+*.pem
+id_ocp_lab
+id_ocp_lab.pub
+
+# OS
+.DS_Store
