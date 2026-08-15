@@ -155,13 +155,25 @@ load_ai_env() {
   : "${TUNE_BASE_MODEL:=Qwen/Qwen2.5-0.5B-Instruct}"
   : "${TUNE_ADAPTER_NAME:=lab-style}"
 
+  # ----------------------------------------------------------------
+  # Ray
+  # ----------------------------------------------------------------
+  # 다른 이미지들과 달리 이건 클러스터에서 못 꺼냅니다.
+  # RHOAI 3.4.3 은 KubeRay 오퍼레이터 이미지만 RELATED_IMAGE 로 들고 있고,
+  # Ray 노드가 쓸 런타임 이미지는 사용자가 고르게 되어 있습니다.
+  #
+  # 태그의 py/cu 조합이 RayCluster 의 rayVersion 과 맞아야 합니다.
+  # 어긋나면 워커가 헤드에 붙지 못하고 재시작만 반복하는데,
+  # 로그에는 연결 실패만 남아서 버전 문제인 걸 알아채기 어렵습니다.
+  : "${IMAGE_RAY:=quay.io/modh/ray:2.46.0-py311-cu121}"
+
   export AGENT_NAMESPACE RHOAI_NAMESPACE STORAGE_CLASS AGENT_OFFLINE
   export IMAGE_LLAMA IMAGE_LITELLM IMAGE_QDRANT IMAGE_OPENWEBUI IMAGE_PHOENIX
   export IMAGE_UBI IMAGE_PYTHON IMAGE_DEVTOOLS IMAGE_MINIO IMAGE_OAUTH_PROXY
   export MODEL_NAME MODEL_URL MODEL_HF_REPO
   export VLLM_MODEL_NAME VLLM_GPU_UTIL VLLM_MAX_LEN
   export GPU_INSTANCE_TYPE GPU_VOLUME_SIZE
-  export TUNE_BASE_MODEL TUNE_ADAPTER_NAME
+  export TUNE_BASE_MODEL TUNE_ADAPTER_NAME IMAGE_RAY
 }
 
 # ------------------------------------------------------------------

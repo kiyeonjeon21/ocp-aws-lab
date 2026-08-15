@@ -100,17 +100,35 @@ data:
     model.config.use_cache = False
 
     # LoRA 는 원래 가중치를 얼려 두고 작은 행렬 두 개만 학습합니다.
-    # 아래 출력의 trainable% 가 그 비율입니다. 보통 1% 미만입니다.
+    # 아래 출력의 trainable% 가 그 비율입니다.
+    #
+    # ------------------------------------------------------------------
+    # target_modules 에 MLP 를 넣은 이유
+    # ------------------------------------------------------------------
+    # 처음에는 attention 만(q/k/v/o) 걸고 8 epoch 을 돌렸습니다.
+    # 결과는 절반의 성공이었습니다.
+    #   학습 전: "이 랩의 GPU 인스턴스 타입은 CUDA입니다..." (장황하고 틀림)
+    #   학습 후: "P300-A4000 입니다."                        (형식은 맞고 사실은 틀림)
+    #
+    # 짧고 단정한 문체는 배웠는데 사실은 못 배운 것입니다.
+    # 트랜스포머에서 사실 지식은 주로 MLP 층에 저장된다고 봅니다.
+    # attention 만 건드리면 "어떻게 말할지" 는 바뀌어도 "무엇을 아는지" 는 잘 안 바뀝니다.
+    #
+    # 그래서 gate/up/down_proj 를 추가하고 r 을 키웠습니다.
+    # 이 랩에서 이 파일을 고쳐 가며 확인할 지점이 바로 여기입니다.
     peft = LoraConfig(
-        r=16, lora_alpha=32, lora_dropout=0.05, bias="none",
+        r=32, lora_alpha=64, lora_dropout=0.05, bias="none",
         task_type="CAUSAL_LM",
-        target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
+        target_modules=["q_proj", "k_proj", "v_proj", "o_proj",
+                        "gate_proj", "up_proj", "down_proj"],
     )
     model = get_peft_model(model, peft)
     model.print_trainable_parameters()
 
+    # 16개 예제에 8 epoch(32 스텝)은 문체를 옮기기엔 충분해도
+    # 사실을 새기기엔 모자랐습니다. 늘려도 몇 분입니다.
     args = TrainingArguments(
-        output_dir=OUT, num_train_epochs=8,
+        output_dir=OUT, num_train_epochs=40,
         per_device_train_batch_size=1, gradient_accumulation_steps=4,
         learning_rate=2e-4, logging_steps=5, save_strategy="no",
         bf16=True, report_to=[],

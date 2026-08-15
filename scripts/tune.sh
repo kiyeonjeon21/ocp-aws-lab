@@ -4,6 +4,7 @@
 #   ./scripts/tune.sh run       서빙을 내리고 PyTorchJob 실행
 #   ./scripts/tune.sh logs      학습 로그 따라가기
 #   ./scripts/tune.sh status    잡과 어댑터 상태
+#   ./scripts/tune.sh compare   학습 전후를 같은 질문으로 비교
 #   ./scripts/tune.sh clean     잡 삭제 (어댑터 PVC 는 남깁니다)
 #
 # ------------------------------------------------------------------
@@ -167,5 +168,23 @@ clean)
   printf "\n"
   ;;
 
-*) die "사용법: $0 run | logs | status | restore | clean" ;;
+# ==================================================================
+compare)
+  head1 "학습 전후 비교"
+  # PyTorchJob Succeeded 와 어댑터 파일 생성은 학습이 됐다는 증거가 아닙니다.
+  # 손실이 안 내려갔어도 파일은 똑같이 생깁니다.
+  # 같은 질문에 답이 달라지는 것만이 증거입니다.
+  if oc get job lora-compare -n "$RHOAI_NAMESPACE" >/dev/null 2>&1; then
+    oc delete job lora-compare -n "$RHOAI_NAMESPACE" --wait=true >/dev/null 2>&1
+    info "이전 비교 잡 삭제"
+  fi
+  oc apply -f "$CLUSTER_DIR/manifests/80-tuning/20-compare-job.yaml" >/dev/null \
+    || die "적용 실패. 먼저: ./scripts/render-manifests.sh"
+  ok "lora-compare 실행"
+  printf "\n"
+  info "로그: oc logs -f job/lora-compare -n $RHOAI_NAMESPACE"
+  printf "\n"
+  ;;
+
+*) die "사용법: $0 run | logs | status | compare | restore | clean" ;;
 esac

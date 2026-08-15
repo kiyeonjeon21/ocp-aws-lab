@@ -85,3 +85,5 @@ machineset.machine.openshift.io/lab1-cxfgs-gpu-us-east-1a scaled
 ```
 
 </details>
+
+- `05:39:49` LoRA 튜닝 성공. 1차(attention만 r=16, 8ep, 0.44% param)는 문체만 학습하고 사실은 틀림. 2차(MLP 추가 r=32, 40ep, 3.44% param, 94초)는 3개 질문 전부 정답. 서빙 복구함
