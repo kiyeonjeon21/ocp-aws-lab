@@ -123,3 +123,37 @@ machineset.machine.openshift.io/lab1-cxfgs-gpu-us-east-1a scaled
 </details>
 
 - `06:25:49` MLflow 연동 완료. RHOAI 3.4 MLflow 는 멀티테넌트라 Bearer 토큰 + X-Mlflow-Workspace 헤더 둘 다 필요. 권한은 view=읽기, edit=쓰기(실험 생성 200). 전용 SA tuning 으로 분리. 실험 lora-lab-style 생성 확인(artifact_location mlflow-artifacts:/workspaces/ai-serving/2). 마지막 학습은 132/160 진행 중 GPU 반납으로 중단됨(내 조작)
+
+<details>
+<summary><code>./scripts/destroy-cluster.sh</code> - OK (5s)</summary>
+
+```text
+
+== 삭제 대상
+  cluster : lab1
+  infraID : lab1-cxfgs
+  region  : us-east-1
+  aws     : arn:aws:iam::584625391472:user/ocp-lab-admin
+
+== 워크로드가 만든 AWS 리소스 확인
+  OK    고아가 될 LoadBalancer 서비스 없음
+  WARN  Bound 상태 PVC 11개. 지우지 않으면 EBS 볼륨이 남을 수 있습니다
+
+  WARN  되돌릴 수 없습니다. 클러스터 이름을 그대로 입력하면 진행합니다.
+클러스터 이름 (lab1): 취소했습니다.
+```
+
+</details>
+
+- `06:35:57` 정리 완료. verify-clean(lab1-cxfgs) 전 항목 OK, sweep 과금 리소스 없음. NAT/LB/CLB/EBS/EIP/VPC/S3/IAM/프라이빗존 전부 삭제 확인. 퍼블릭존 ocp.kiyeonjeon.com 은 유지(계정 소유). 다른 프로젝트 S3 버킷 12개는 손대지 않음
+
+## 마무리
+
+- **종료**: 2026-08-16 06:35:57 KST
+- **결과**: ok
+- **소요**: 7996초 (2.22시간)
+- **추정 비용**: 약 $3.42 (시간당 $1.54, ai 프로파일)
+
+### 다음에 다르게 할 것
+
+-
