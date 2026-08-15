@@ -22,6 +22,51 @@
 # 실제 환경이라면 Postgres 입니다. 여러 replica 가 같은 상태를 봐야 하니까요.
 # PVC 가 RWO 라 replica 를 늘릴 수 없다는 점이 그 제약을 그대로 보여줍니다.
 ---
+# oauth-proxy 가 OAuth 클라이언트로 등록되기 위한 ServiceAccount.
+#
+# 어노테이션이 핵심입니다.
+# OCP 는 이 어노테이션을 보고 "이 SA 는 이 Route 로 리다이렉트해도 되는 OAuth 클라이언트"
+# 라고 인정합니다. 별도 OAuthClient 오브젝트를 만들 필요가 없습니다.
+# 이름(primary)은 아무거나 되지만 아래 kind/name 과 짝이 맞아야 합니다.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: langgraph-sso
+  namespace: ${AGENT_NAMESPACE}
+  annotations:
+    serviceaccounts.openshift.io/oauth-redirectreference.primary: >-
+      {"kind":"OAuthRedirectReference","apiVersion":"v1","reference":{"kind":"Route","name":"langgraph"}}
+---
+# oauth-proxy 가 --openshift-sar 로 권한 검사를 하려면
+# 사용자를 대신해 SubjectAccessReview / TokenReview 를 만들 수 있어야 합니다.
+# 그 권한이 system:auth-delegator 입니다.
+#
+# 이게 없으면 인증에 성공한 사용자까지 403 이 납니다.
+# 심지어 cluster-admin 토큰도 막힙니다. 검사 자체가 실패하기 때문입니다.
+# 화면에는 로그인 페이지가 나와서 "인증이 안 됐나" 로 오해하기 쉽습니다.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: langgraph-sso-auth-delegator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:auth-delegator
+subjects:
+  - kind: ServiceAccount
+    name: langgraph-sso
+    namespace: ${AGENT_NAMESPACE}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: langgraph-oauth-cookie
+  namespace: ${AGENT_NAMESPACE}
+type: Opaque
+stringData:
+  # 세션 쿠키 서명 키. 랩용 고정값입니다.
+  session_secret: lab-cookie-secret-not-random
+---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -177,6 +222,7 @@ spec:
       labels:
         app: langgraph
     spec:
+      serviceAccountName: langgraph-sso
       containers:
         - name: langgraph
           image: ${IMAGE_PYTHON}
@@ -239,7 +285,62 @@ spec:
               drop: ["ALL"]
             seccompProfile:
               type: RuntimeDefault
+        # ------------------------------------------------------------
+        # oauth-proxy: OCP 로그인을 이 앱 앞에 세웁니다
+        # ------------------------------------------------------------
+        # 이 앱들은 원래 자체 인증이 없거나 꺼져 있습니다.
+        # 퍼블릭 DNS 로 Route 가 열려 있으므로 그대로 두면 도메인만 알면 누구나 씁니다.
+        #
+        # oauth-proxy 를 사이드카로 두면
+        #   - 브라우저는 OCP 로그인 화면으로 리다이렉트됩니다(다른 콘솔과 같은 SSO)
+        #   - 프로그램은 Bearer 토큰으로 붙습니다: oc whoami -t
+        #
+        # upstream 이 localhost 인 게 중요합니다.
+        # Service 가 프록시 포트만 노출하므로 앱 포트로 우회할 수 없습니다.
+        - name: oauth-proxy
+          image: ${IMAGE_OAUTH_PROXY}
+          args:
+            - --https-address=:8443
+            - --provider=openshift
+            - --openshift-service-account=langgraph-sso
+            - --upstream=http://localhost:8000
+            - --tls-cert=/etc/tls/private/tls.crt
+            - --tls-key=/etc/tls/private/tls.key
+            - --cookie-secret-file=/etc/proxy/secrets/session_secret
+            # 이 네임스페이스에 접근 권한이 있는 사용자만 통과시킵니다.
+            # 인증(누구인가)에 더해 인가(권한이 있는가)까지 겁니다.
+            - --openshift-sar={"namespace":"${AGENT_NAMESPACE}","resource":"services","verb":"get"}
+          ports:
+            - name: https
+              containerPort: 8443
+          volumeMounts:
+            - name: proxy-tls
+              mountPath: /etc/tls/private
+            - name: proxy-cookie
+              mountPath: /etc/proxy/secrets
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
       volumes:
+        - name: proxy-tls
+          secret:
+            # service.beta.openshift.io/serving-cert-secret-name 어노테이션을 보고
+            # OCP 가 클러스터 CA 로 서명한 인증서를 여기에 만들어 줍니다.
+            secretName: langgraph-tls
+        - name: proxy-cookie
+          secret:
+            secretName: langgraph-oauth-cookie
         - name: app
           configMap:
             name: langgraph-app
@@ -252,13 +353,15 @@ kind: Service
 metadata:
   name: langgraph
   namespace: ${AGENT_NAMESPACE}
+  annotations:
+    service.beta.openshift.io/serving-cert-secret-name: langgraph-tls
 spec:
   selector:
     app: langgraph
   ports:
-    - name: http
-      port: 8000
-      targetPort: http
+    - name: https
+      port: 8443
+      targetPort: https
 ---
 apiVersion: route.openshift.io/v1
 kind: Route
@@ -271,7 +374,9 @@ spec:
     kind: Service
     name: langgraph
   port:
-    targetPort: http
+    targetPort: https
   tls:
-    termination: edge
+    # oauth-proxy 가 TLS 를 직접 종료하므로 라우터는 재암호화해서 넘깁니다.
+    # edge 로 두면 라우터-파드 구간이 평문이 되고 oauth-proxy 가 거부합니다.
+    termination: reencrypt
     insecureEdgeTerminationPolicy: Redirect

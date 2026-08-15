@@ -106,6 +106,8 @@ load_ai_env() {
   : "${IMAGE_DEVTOOLS:=$IMAGE_PYTHON}"
   # RHOAI 3.4 는 번들 MinIO 를 걷어냈습니다. DSPA 의 minio.image 가 required 라 직접 줍니다.
   : "${IMAGE_MINIO:=quay.io/minio/minio:latest}"
+  # 앱 앞에 OCP 로그인을 세우는 표준 사이드카.
+  : "${IMAGE_OAUTH_PROXY:=registry.redhat.io/openshift4/ose-oauth-proxy-rhel9:latest}"
 
   # 모델 가중치.
   # 인터넷이 있는 클러스터라서 initContainer 가 런타임에 받아옵니다.
@@ -141,7 +143,7 @@ load_ai_env() {
 
   export AGENT_NAMESPACE RHOAI_NAMESPACE STORAGE_CLASS AGENT_OFFLINE
   export IMAGE_LLAMA IMAGE_LITELLM IMAGE_QDRANT IMAGE_OPENWEBUI IMAGE_PHOENIX
-  export IMAGE_UBI IMAGE_PYTHON IMAGE_DEVTOOLS IMAGE_MINIO
+  export IMAGE_UBI IMAGE_PYTHON IMAGE_DEVTOOLS IMAGE_MINIO IMAGE_OAUTH_PROXY
   export MODEL_NAME MODEL_URL MODEL_HF_REPO
   export VLLM_MODEL_NAME VLLM_GPU_UTIL VLLM_MAX_LEN
   export GPU_INSTANCE_TYPE GPU_VOLUME_SIZE
