@@ -166,6 +166,18 @@ kind: PyTorchJob
 metadata:
   name: lora-${TUNE_ADAPTER_NAME}
   namespace: ${RHOAI_NAMESPACE}
+  labels:
+    # 이 라벨 하나가 "RHOAI 대시보드에 보이나" 를 가릅니다.
+    #
+    # RHOAI 의 Distributed workloads 화면은 PyTorchJob 을 직접 보지 않습니다.
+    # Kueue 가 만드는 Workload 오브젝트를 봅니다.
+    # 큐 이름이 없으면 Kueue 를 안 거치므로 Workload 가 안 생기고,
+    # 잡은 정상으로 돌지만 대시보드에는 아무것도 안 뜹니다.
+    #
+    # 대신 큐를 거치면 쿼터 검사를 받습니다.
+    # ClusterQueue 에 nvidia.com/gpu 쿼터가 없으면 여기서 Pending 으로 막힙니다.
+    # install-rhoai.sh distributed 가 그 쿼터를 채워 둡니다.
+    kueue.x-k8s.io/queue-name: default
 spec:
   runPolicy:
     # 끝난 파드를 바로 지우지 않습니다. 로그를 봐야 합니다.

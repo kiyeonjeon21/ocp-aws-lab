@@ -425,7 +425,74 @@ distributed)
   # 켜면 TrainerReady=False 로 DSC 전체가 Not Ready 가 됩니다.
   ok "trainer 는 건너뜁니다 (JobSet 오퍼레이터 없음)"
 
-  head1 "3. 컴포넌트별 준비 상태"
+  head1 "3. Kueue 배선"
+
+  # 여기까지 하면 Kueue 는 설치되지만 아무것도 관리하지 않습니다.
+  # RHOAI 대시보드의 Distributed workloads 화면도 계속 비어 있습니다.
+  # 세 가지가 더 필요하고, 셋 다 빠뜨리기 쉽습니다.
+
+  # (1) 네임스페이스를 관리 대상으로 표시합니다.
+  #     ClusterQueue 의 namespaceSelector 가 이 라벨을 봅니다.
+  #     라벨을 붙이면 RHOAI 가 LocalQueue(default)를 알아서 만들어 줍니다.
+  oc label ns "$RHOAI_NAMESPACE" kueue.openshift.io/managed=true --overwrite >/dev/null 2>&1 \
+    && ok "$RHOAI_NAMESPACE 를 Kueue 관리 대상으로" \
+    || warn "네임스페이스 라벨 실패"
+
+  # (2) 관리할 프레임워크를 켭니다.
+  #     기본값은 BatchJob 하나뿐입니다.
+  #     PyTorchJob 과 RayCluster 는 큐 라벨을 붙여도 Workload 가 안 생기고,
+  #     잡은 정상으로 돌지만 대시보드에는 아무것도 안 뜹니다.
+  #     원인이 CR 이 아니라 오퍼레이터 설정에 있어서 찾기 어렵습니다.
+  if oc get kueues.kueue.openshift.io cluster >/dev/null 2>&1; then
+    CUR_FW=$(oc get kueues.kueue.openshift.io cluster \
+             -o jsonpath='{.spec.config.integrations.frameworks}' 2>/dev/null)
+    if [[ "$CUR_FW" == *PyTorchJob* && "$CUR_FW" == *RayCluster* ]]; then
+      ok "프레임워크 이미 설정됨"
+    else
+      oc patch kueues.kueue.openshift.io cluster --type=merge \
+        -p '{"spec":{"config":{"integrations":{"frameworks":["BatchJob","PyTorchJob","RayCluster","RayJob"]}}}}' \
+        >/dev/null 2>&1 \
+        && ok "프레임워크: BatchJob, PyTorchJob, RayCluster, RayJob" \
+        || warn "프레임워크 설정 실패"
+      oc rollout status deploy/kueue-controller-manager -n "$KUEUE_NS" --timeout=180s >/dev/null 2>&1
+    fi
+  else
+    warn "kueues.kueue.openshift.io/cluster 가 없습니다"
+  fi
+
+  # (3) ClusterQueue 에 GPU 쿼터를 넣습니다.
+  #     RHOAI 가 만드는 기본 ClusterQueue 는 cpu 와 memory 만 덮습니다.
+  #     GPU 를 요청하는 잡은 "덮이지 않은 자원" 이라 승인 자체가 안 됩니다.
+  #
+  #     주의: 이 쿼터는 스케줄 보장이 아닙니다.
+  #     Kueue 는 자기가 관리하는 워크로드만 셉니다.
+  #     vLLM 서빙은 Deployment 라 Kueue 밖이고, 그게 GPU 를 쥐고 있으면
+  #     Kueue 는 "1장 비었다" 고 승인하지만 스케줄러는 Pending 을 냅니다.
+  GPU_N=$(oc get nodes -l node-role.kubernetes.io/gpu \
+    -o jsonpath='{range .items[*]}{.status.allocatable.nvidia\.com/gpu}{"\n"}{end}' 2>/dev/null \
+    | awk '{s+=$1} END {print s+0}')
+  if oc get clusterqueue default >/dev/null 2>&1; then
+    if [[ "$GPU_N" -gt 0 ]]; then
+      CQ=$(oc get clusterqueue default -o json)
+      NEW_CQ=$(jq -c --argjson g "$GPU_N" '
+        .spec.resourceGroups[0].coveredResources |= (. + ["nvidia.com/gpu"] | unique)
+        | .spec.resourceGroups[0].flavors[0].resources |= (
+            (map(select(.name != "nvidia.com/gpu"))) + [{name: "nvidia.com/gpu", nominalQuota: $g}]
+          )' <<<"$CQ")
+      oc replace -f - >/dev/null 2>&1 <<<"$NEW_CQ" \
+        && ok "ClusterQueue default 에 nvidia.com/gpu=$GPU_N" \
+        || warn "ClusterQueue 갱신 실패"
+    else
+      info "GPU 노드가 없어 GPU 쿼터는 건너뜁니다"
+    fi
+  else
+    warn "ClusterQueue default 가 없습니다"
+  fi
+
+  info "워크로드에 이 라벨이 있어야 큐를 탑니다: kueue.x-k8s.io/queue-name: default"
+  info "라벨은 생성 시점에만 반영됩니다. 기존 잡은 지우고 다시 만들어야 합니다"
+
+  head1 "4. 컴포넌트별 준비 상태"
   info "컨트롤러 기동에 3~5분 걸립니다."
 
   # Kueue 는 기동 순서 경합이 있습니다.
@@ -471,7 +538,7 @@ distributed)
              | select(.type|test("^(Ray|Kueue|TrainingOperator|Trainer)Ready$"))
              | "  \(.type)=\(.status)  \(.message // "")"'
 
-  head1 "4. 쓸 수 있게 된 것"
+  head1 "5. 쓸 수 있게 된 것"
   for crd in rayclusters.ray.io rayjobs.ray.io pytorchjobs.kubeflow.org \
              clusterqueues.kueue.x-k8s.io localqueues.kueue.x-k8s.io; do
     if oc get crd "$crd" >/dev/null 2>&1; then

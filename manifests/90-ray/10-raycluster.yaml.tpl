@@ -35,6 +35,10 @@ kind: RayCluster
 metadata:
   name: lab-ray
   namespace: ${RHOAI_NAMESPACE}
+  labels:
+    # PyTorchJob 과 같은 이유입니다.
+    # 이게 있어야 Kueue 가 Workload 를 만들고 RHOAI 대시보드에 보입니다.
+    kueue.x-k8s.io/queue-name: default
 spec:
   # KubeRay 오퍼레이터가 이 버전에 맞는 이미지를 붙입니다.
   # rayVersion 과 컨테이너 이미지의 Ray 버전이 어긋나면
