@@ -141,18 +141,37 @@ for r in $REGIONS; do
     printf "  ${C_DIM}사용 중 EBS${C_RST}  %sGB  \$%s/h  ${C_DIM}(인스턴스에 붙어 있음. stop 해도 계속 과금)${C_RST}\n" "$INUSE" "$C"
   fi
 
-  # available = 어느 인스턴스에도 안 붙은 볼륨. 대개 destroy 가 놓친 PVC 잔여물입니다.
+  # available = 어느 인스턴스에도 안 붙은 볼륨.
+  #
+  # 여기서 "안 붙음"과 "잔여물"은 다릅니다.
+  # PVC 가 살아 있어도 그 파드를 쓰는 노드가 없으면 볼륨은 분리된 채 남습니다.
+  # gpu-node.sh down 을 하면 model-cache(모델 가중치 40GB)가 정확히 이 상태가 됩니다.
+  # 다음에 GPU 를 올릴 때 다시 붙고, 14GB 재다운로드를 안 하는 것이 이 PVC 의 목적입니다.
+  #
+  # 이걸 전부 빨간 잔여물로 찍으면 오경보가 됩니다.
+  # 매번 뜨는 경고는 읽히지 않게 되고, 그러면 진짜 잔여물도 같이 묻힙니다.
+  # 그래서 PVC 태그를 같이 읽어 출처를 밝힙니다. 판단은 사람이 합니다.
   VOL=$(aws ec2 describe-volumes --region "$r" \
     --filters Name=status,Values=available \
-    --query 'Volumes[].[VolumeId,Size,VolumeType]' --output text 2>/dev/null)
+    --query 'Volumes[].[VolumeId,Size,VolumeType,
+             Tags[?Key==`kubernetes.io/created-for/pvc/namespace`]|[0].Value,
+             Tags[?Key==`kubernetes.io/created-for/pvc/name`]|[0].Value]' \
+    --output text 2>/dev/null)
   if [[ -n "$VOL" ]]; then
     section; hit
-    printf "  ${C_RED}미사용 EBS 볼륨${C_RST}  (어디에도 안 붙었는데 과금됩니다)\n"
-    while IFS=$'\t' read -r id size type; do
+    printf "  ${C_RED}붙어 있지 않은 EBS 볼륨${C_RST}  (분리 상태여도 용량만큼 과금됩니다)\n"
+    while IFS=$'\t' read -r id size type pvcns pvcname; do
       [[ -z "$id" ]] && continue
       add_cost "$(awk -v s="$size" 'BEGIN { printf "%.4f", s*0.08/730 }')"
-      printf "    %-24s %sGB %s\n" "$id" "$size" "$type"
+      if [[ "$pvcns" == "None" || -z "$pvcns" ]]; then
+        printf "    %-24s %sGB %-6s ${C_RED}출처 불명. 잔여물일 가능성이 큽니다${C_RST}\n" \
+               "$id" "$size" "$type"
+      else
+        printf "    %-24s %sGB %-6s PVC %s/%s\n" "$id" "$size" "$type" "$pvcns" "$pvcname"
+      fi
     done <<<"$VOL"
+    printf "    ${C_DIM}PVC 이름이 보이면 그 PVC 가 아직 있는지 확인하세요: oc get pvc -A${C_RST}\n"
+    printf "    ${C_DIM}클러스터를 이미 지웠다면 PVC 이름이 있어도 잔여물입니다${C_RST}\n"
   fi
 
   # ---------------------------------------------------------------- EIP
