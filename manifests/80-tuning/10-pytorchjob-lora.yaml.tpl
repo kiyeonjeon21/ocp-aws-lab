@@ -47,6 +47,43 @@ spec:
     requests:
       storage: 20Gi
 ---
+# 학습 잡 전용 ServiceAccount.
+#
+# ------------------------------------------------------------------
+# MLflow 에 쓰려면 네임스페이스 권한이 필요합니다
+# ------------------------------------------------------------------
+# RHOAI 3.4 의 MLflow 는 워크스페이스(= 네임스페이스) 단위로 권한을 검사합니다.
+# 토큰이 유효해도 그 네임스페이스에 대한 권한이 없으면 거부합니다.
+#
+# 실측입니다.
+#   권한 없음  experiments/get-by-name -> 403
+#   view       -> 404 (실험이 없다는 정상 응답. 읽기는 됨)
+#              experiments/create      -> 403
+#   edit       experiments/create      -> 200
+#
+# 즉 조회만 하려면 view, 실험과 run 을 만들려면 edit 입니다.
+# default SA 에 권한을 붙이지 않습니다.
+# 그 네임스페이스의 모든 파드가 같이 권한을 갖게 되기 때문입니다.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tuning
+  namespace: ${RHOAI_NAMESPACE}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: tuning-mlflow
+  namespace: ${RHOAI_NAMESPACE}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: edit
+subjects:
+  - kind: ServiceAccount
+    name: tuning
+    namespace: ${RHOAI_NAMESPACE}
+---
 # 학습 스크립트와 데이터셋.
 #
 # 데이터를 ConfigMap 에 넣는 건 실제 환경에서 할 일이 아닙니다.
@@ -77,6 +114,35 @@ data:
     if torch.cuda.is_available():
         p = torch.cuda.get_device_properties(0)
         print(f"[gpu] {p.name} {p.total_memory/1024**3:.1f} GiB", flush=True)
+
+    # ------------------------------------------------------------------
+    # MLflow 연결
+    # ------------------------------------------------------------------
+    # RHOAI 3.4 의 MLflow 는 멀티테넌트입니다. 토큰만으로는 부족합니다.
+    #   Authorization: Bearer <SA 토큰>   -> 없으면 401
+    #   X-Mlflow-Workspace: <네임스페이스> -> 없으면 400
+    #     {"error":{"code":"INVALID_PARAMETER_VALUE",
+    #               "message":"Workspace context is required for this request."}}
+    #
+    # 토큰은 MLFLOW_TRACKING_TOKEN 이라는 표준 환경변수가 있는데
+    # 워크스페이스 헤더는 그런 게 없습니다.
+    # MLflow 의 request header provider 확장점에 등록해서 넣습니다.
+    # 이게 문서화된 방법이라 버전이 올라가도 덜 깨집니다.
+    ws = os.environ.get("MLFLOW_WORKSPACE")
+    if ws:
+        from mlflow.tracking.request_header.abstract_request_header_provider import (
+            RequestHeaderProvider)
+        from mlflow.tracking.request_header.registry import _request_header_provider_registry
+
+        class WorkspaceHeader(RequestHeaderProvider):
+            def in_context(self):
+                return True
+
+            def request_headers(self):
+                return {"X-Mlflow-Workspace": ws}
+
+        _request_header_provider_registry.register(WorkspaceHeader)
+        print(f"[mlflow] workspace={ws} uri={os.environ.get('MLFLOW_TRACKING_URI')}", flush=True)
 
     rows = [json.loads(l) for l in open("/data/train.jsonl") if l.strip()]
     print(f"[data] {len(rows)} rows", flush=True)
@@ -131,13 +197,42 @@ data:
         output_dir=OUT, num_train_epochs=40,
         per_device_train_batch_size=1, gradient_accumulation_steps=4,
         learning_rate=2e-4, logging_steps=5, save_strategy="no",
-        bf16=True, report_to=[],
+        bf16=True,
+        # 여기가 비어 있으면 학습이 어디에도 아무것도 안 남깁니다.
+        # PyTorchJob 이 Succeeded 이고 어댑터 파일이 생겨도
+        # 손실도 하이퍼파라미터도 결과 모델도 기록되지 않습니다.
+        # RHOAI 의 Workload metrics 화면은 Kueue 의 큐 회계라 학습 내용이 없습니다.
+        # 학습 내용이 남는 곳은 Experiments (MLflow) 입니다.
+        report_to=(["mlflow"] if ws else []),
     )
-    Trainer(model=model, args=args, train_dataset=ds,
-            data_collator=DataCollatorForLanguageModeling(tok, mlm=False)).train()
+    trainer = Trainer(model=model, args=args, train_dataset=ds,
+                      data_collator=DataCollatorForLanguageModeling(tok, mlm=False))
+
+    # Trainer 가 자동으로 남기는 건 학습 인자와 손실뿐입니다.
+    # LoRA 설정은 모델 쪽이라 안 잡히는데, 나중에 실험을 비교할 때
+    # 정작 알고 싶은 게 이쪽입니다. 직접 넣습니다.
+    if ws:
+        import mlflow
+        mlflow.log_params({
+            "base_model": BASE,
+            "lora_r": peft.r,
+            "lora_alpha": peft.lora_alpha,
+            "lora_target_modules": ",".join(peft.target_modules),
+            "dataset_rows": len(rows),
+        })
+
+    trainer.train()
 
     model.save_pretrained(OUT)
     tok.save_pretrained(OUT)
+
+    if ws:
+        import mlflow
+        # 어댑터를 아티팩트로 올립니다. 8MB 정도라 부담이 없습니다.
+        # 이게 있어야 "이 실험의 결과물" 이 실험 기록 안에서 완결됩니다.
+        mlflow.log_artifacts(OUT, artifact_path="adapter")
+        mlflow.end_run()
+        print("[mlflow] run 기록 완료", flush=True)
     print(f"[done] adapter saved to {OUT}", flush=True)
     print("[files] " + ", ".join(sorted(os.listdir(OUT))), flush=True)
 
@@ -189,6 +284,8 @@ spec:
       restartPolicy: Never
       template:
         spec:
+          # default 가 아니라 전용 SA 입니다. 위의 RoleBinding 참고.
+          serviceAccountName: tuning
           # GPU 노드에는 taint 가 붙어 있습니다.
           # toleration 이 없으면 파드가 Pending 에 머무는데,
           # 이벤트를 안 보면 "GPU 가 없다" 로 오해하기 쉽습니다.
@@ -207,6 +304,10 @@ spec:
                   # 버전마다 들어 있는 게 달라서 있는지 보고 없으면 받습니다.
                   python -c "import peft" 2>/dev/null || pip install --no-cache-dir peft
                   python -c "import datasets" 2>/dev/null || pip install --no-cache-dir datasets
+                  python -c "import mlflow" 2>/dev/null || pip install --no-cache-dir mlflow
+                  # MLflow 는 Bearer 토큰을 MLFLOW_TRACKING_TOKEN 에서 읽습니다.
+                  # 파드의 SA 토큰을 그대로 넘깁니다. 매니페스트에 값이 박히지 않습니다.
+                  export MLFLOW_TRACKING_TOKEN="$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)"
                   exec python /code/train.py
               env:
                 - name: TUNE_BASE_MODEL
@@ -219,6 +320,19 @@ spec:
                   value: "/tmp"
                 - name: HF_HOME
                   value: "/tmp/hf"
+                # MLflow 서버는 RHOAI 가 redhat-ods-applications 에 띄웁니다.
+                # MLflow CR 은 클러스터 스코프라 네임스페이스를 안 따라옵니다.
+                - name: MLFLOW_TRACKING_URI
+                  value: "https://mlflow.redhat-ods-applications.svc:8443"
+                # 인증서가 클러스터 CA 서명이라 파이썬 신뢰 저장소에 없습니다.
+                # 실제 환경이라면 CA 번들을 마운트하세요.
+                - name: MLFLOW_TRACKING_INSECURE_TLS
+                  value: "true"
+                # 워크스페이스 = 네임스페이스. 없으면 400 입니다.
+                - name: MLFLOW_WORKSPACE
+                  value: "${RHOAI_NAMESPACE}"
+                - name: MLFLOW_EXPERIMENT_NAME
+                  value: "lora-${TUNE_ADAPTER_NAME}"
               resources:
                 requests:
                   cpu: "2"

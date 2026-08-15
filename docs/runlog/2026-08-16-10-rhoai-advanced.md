@@ -104,3 +104,22 @@ machineset.machine.openshift.io/lab1-cxfgs-gpu-us-east-1a scaled
 ```
 
 </details>
+
+<details>
+<summary><code>./scripts/gpu-node.sh down</code> - OK (3s)</summary>
+
+```text
+
+== GPU 노드 축소
+machineset.machine.openshift.io/lab1-cxfgs-gpu-us-east-1a scaled
+  OK    replicas=0. EC2 와 EBS 가 사라지면 과금이 멈춥니다
+  MachineSet 은 남습니다. 다시 쓰려면 ./scripts/gpu-node.sh up
+
+  실제로 사라졌는지 확인:
+    oc get machine -n openshift-machine-api | grep gpu
+
+```
+
+</details>
+
+- `06:25:49` MLflow 연동 완료. RHOAI 3.4 MLflow 는 멀티테넌트라 Bearer 토큰 + X-Mlflow-Workspace 헤더 둘 다 필요. 권한은 view=읽기, edit=쓰기(실험 생성 200). 전용 SA tuning 으로 분리. 실험 lora-lab-style 생성 확인(artifact_location mlflow-artifacts:/workspaces/ai-serving/2). 마지막 학습은 132/160 진행 중 GPU 반납으로 중단됨(내 조작)
