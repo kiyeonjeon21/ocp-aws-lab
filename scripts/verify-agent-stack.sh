@@ -133,6 +133,19 @@ else
     fail "추론 실패"
     sed 's/^/      /' <<<"${R:0:400}"
   fi
+
+  # 키 없이도 되면 마스터 키가 아무 의미가 없습니다.
+  # LiteLLM 은 Route 로 밖에 나가 있고 그 앞에는 oauth-proxy 가 없습니다.
+  # CLI 클라이언트(aider 등)가 OAuth 를 못 하기 때문에 그게 맞는 설계이고,
+  # 그래서 이 랩에서 LiteLLM 을 지키는 건 마스터 키 하나뿐입니다.
+  # 한 번 확인하고 끝낼 속성이 아니라 회귀 검사로 둡니다.
+  U=$(in_pod "curl -sS -o /dev/null -w '%{http_code}' --max-time 30 \
+        http://litellm:4000/v1/models")
+  if [[ "$U" == "401" || "$U" == "403" ]]; then
+    pass "키 없는 호출은 거부됨 ($U)"
+  else
+    fail "키 없이 /v1/models 가 $U. 마스터 키가 강제되지 않고 있습니다"
+  fi
 fi
 fi
 
