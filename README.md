@@ -1040,7 +1040,7 @@ Terminal 탭은 처음 열릴 때 xterm을 **1열 1행**으로 잡습니다.
 
 직접 확인한 근거입니다.
 
-```
+```text
 콘솔이 보내는 exec 명령을 pty로 재현      -> "(app-root) sh-5.1$ "  정상
 브라우저에서 .xterm-screen 크기 측정       -> 19x19 px, 행 1개
 resize 이벤트 1회                          -> 1315x567, 27행, 프롬프트 표시
@@ -1054,6 +1054,7 @@ openshift-console 자신의 파드에서도 동일    -> 우리 이미지와 무
 source scripts/env.sh
 oc rsh deploy/coding-agent
 ```
+
 </details>
 
 <details>
