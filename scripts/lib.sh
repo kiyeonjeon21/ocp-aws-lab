@@ -141,12 +141,27 @@ load_ai_env() {
   : "${GPU_INSTANCE_TYPE:=g6.xlarge}"
   : "${GPU_VOLUME_SIZE:=200}"
 
+  # ----------------------------------------------------------------
+  # 파인튜닝
+  # ----------------------------------------------------------------
+  # 서빙용 7B 를 그대로 쓰지 않습니다.
+  #
+  # L4 는 24GB 한 장이고, 이 랩에서는 서빙과 학습이 같은 카드를 놓고 다툽니다.
+  # 7B 를 LoRA 로 돌리려면 4bit 양자화까지 끌고 와야 하고, 그러면 관찰하려던
+  # "LoRA 가 무엇을 하는가" 대신 "메모리를 어떻게 욱여넣는가" 가 실습이 됩니다.
+  #
+  # 0.5B 면 fp16 으로 그냥 올라가고 몇 분이면 끝납니다.
+  # 파이프라인이 도는 것을 먼저 보고, 모델 크기는 그다음 문제입니다.
+  : "${TUNE_BASE_MODEL:=Qwen/Qwen2.5-0.5B-Instruct}"
+  : "${TUNE_ADAPTER_NAME:=lab-style}"
+
   export AGENT_NAMESPACE RHOAI_NAMESPACE STORAGE_CLASS AGENT_OFFLINE
   export IMAGE_LLAMA IMAGE_LITELLM IMAGE_QDRANT IMAGE_OPENWEBUI IMAGE_PHOENIX
   export IMAGE_UBI IMAGE_PYTHON IMAGE_DEVTOOLS IMAGE_MINIO IMAGE_OAUTH_PROXY
   export MODEL_NAME MODEL_URL MODEL_HF_REPO
   export VLLM_MODEL_NAME VLLM_GPU_UTIL VLLM_MAX_LEN
   export GPU_INSTANCE_TYPE GPU_VOLUME_SIZE
+  export TUNE_BASE_MODEL TUNE_ADAPTER_NAME
 }
 
 # ------------------------------------------------------------------

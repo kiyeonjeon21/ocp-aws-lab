@@ -37,6 +37,31 @@ fi
 export STORAGE_CLASS
 
 # ------------------------------------------------------------------
+# 학습 이미지도 클러스터에서 꺼냅니다
+# ------------------------------------------------------------------
+# RHOAI 오퍼레이터는 자기 버전에 맞는 학습 이미지를 RELATED_IMAGE_* 로 들고 있습니다.
+# 이걸 문서에서 베껴 오면 RHOAI 를 올릴 때마다 태그가 어긋납니다.
+# CUDA / torch / python 조합이 여러 개라 가장 최신 CUDA 것을 고릅니다.
+if [[ -z "${IMAGE_TRAINING:-}" ]]; then
+  if [[ -f "$CLUSTER_DIR/auth/kubeconfig" ]] \
+     && KUBECONFIG="$CLUSTER_DIR/auth/kubeconfig" oc whoami >/dev/null 2>&1; then
+    IMAGE_TRAINING=$(KUBECONFIG="$CLUSTER_DIR/auth/kubeconfig" \
+      oc get deploy -n redhat-ods-operator -o json 2>/dev/null \
+      | jq -r '[.items[].spec.template.spec.containers[].env[]?
+                | select(.name|test("^RELATED_IMAGE_ODH_TRAINING_CUDA.*_IMAGE$"))
+                | .name + "=" + .value] | sort | last | split("=")[1] // empty')
+  fi
+  if [[ -z "${IMAGE_TRAINING:-}" ]]; then
+    # 렌더링 자체는 클러스터 없이도 되어야 합니다. 값이 비면 매니페스트 검사에서 걸립니다.
+    IMAGE_TRAINING="registry.redhat.io/rhoai/odh-training-cuda128-torch28-py312-rhel9:latest"
+    warn "학습 이미지를 클러스터에서 못 읽어 관례값을 씁니다"
+  else
+    ok "학습 이미지  ${IMAGE_TRAINING##*/} (RHOAI 오퍼레이터에서 조회)"
+  fi
+fi
+export IMAGE_TRAINING
+
+# ------------------------------------------------------------------
 # 오프라인 스위치 파생
 # ------------------------------------------------------------------
 # AGENT_OFFLINE 하나로 앱 다섯 군데를 동시에 뒤집습니다.
@@ -87,6 +112,7 @@ VARS+=' $MODEL_NAME $MODEL_URL $MODEL_HF_REPO $MODEL_DIR'
 VARS+=' $VLLM_MODEL_NAME $VLLM_GPU_UTIL $VLLM_MAX_LEN $VLLM_API_BASE'
 VARS+=' $OFFLINE_MODE $HF_OFFLINE $VERSION_CHECK $LITELLM_COST_MAP $RAG_EMBEDDING_ENGINE'
 VARS+=' $LLM_API_BASE $SERVING_RUNTIME'
+VARS+=' $IMAGE_TRAINING $TUNE_BASE_MODEL $TUNE_ADAPTER_NAME'
 
 OUT_ROOT="$CLUSTER_DIR/manifests"
 rm -rf "$OUT_ROOT"

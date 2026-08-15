@@ -128,32 +128,41 @@ flowchart TB
         D2["deploy-agent-stack.sh<br/>llama.cpp · LiteLLM · Qdrant · WebUI · Phoenix"]
     end
 
-    subgraph S3["3. Day-2 · OpenShift AI"]
-        A1["gpu-node.sh up<br/>워커 MachineSet 복제 → g6.xlarge"]
-        A2["install-rhoai.sh gpu<br/>NFD + NVIDIA GPU Operator"]
+    subgraph S3["3. Day-2 · OpenShift AI · GPU 없이"]
         A3["install-rhoai.sh rhoai<br/>Operator + DataScienceCluster"]
-        A4["deploy-model.sh<br/>가중치 PVC + InferenceService"]
-        A5["switch-backend.sh vllm<br/>LiteLLM api_base 한 줄 교체"]
+        A6["install-rhoai.sh distributed<br/>Ray · Kueue · TrainingOperator · cert-manager"]
     end
 
-    subgraph S4["4. 검증"]
-        V1["verify-agent-stack.sh<br/>검사 7종"]
+    subgraph S4["4. GPU · 여기서부터 +$0.83/h"]
+        A1["gpu-node.sh up<br/>워커 MachineSet 복제 → g6.xlarge"]
+        A2["install-rhoai.sh gpu<br/>NFD + NVIDIA GPU Operator"]
+        A4["deploy-model.sh<br/>가중치 PVC + InferenceService"]
+        A5["switch-backend.sh vllm<br/>LiteLLM api_base 한 줄 교체"]
+        A7["tune.sh run<br/>LoRA. 서빙을 내리고 같은 GPU 를 씁니다"]
+    end
+
+    subgraph S5["5. 검증"]
+        V1["verify-agent-stack.sh<br/>검사 10종"]
         V2["verify-agent-stack.sh --baseline<br/>오프라인 스위치 ON/OFF 기동시간"]
     end
 
-    subgraph S5["5. 정리"]
+    subgraph S6["6. 정리"]
         T1["gpu-node.sh down<br/>시간당 $0.83 즉시 중단"]
         T2["destroy-cluster.sh"]
-        T3["verify-clean.sh<br/>ELB · EBS · 프라이빗 존 잔여 스캔"]
+        T3["verify-clean.sh<br/>infraID 기준 잔여 스캔"]
+        T4["sweep.sh<br/>기준 없이 리전 전체. 여기가 세션의 끝"]
     end
 
     P1 --> P2 --> C1 --> META
     C1 --> D1 --> D2
     D2 --> V1
-    D2 --> A1 --> A2 --> A3 --> A4 --> A5
+    D2 --> A3 --> A6
+    A6 -->|"여기까지 GPU 0장"| A1
+    A1 --> A2 --> A4 --> A5
     A5 --> V1
+    A5 --> A7
     V1 --> V2
-    A5 --> T1 --> T2 --> T3
+    A7 --> T1 --> T2 --> T3 --> T4
     META -->|"이 파일이 없으면 자동 삭제 불가"| T2
 ```
 
@@ -594,6 +603,9 @@ source scripts/env.sh
 ./scripts/install-rhoai.sh rhoai     # Operator + DataScienceCluster (~30분)
 # 대시보드 / 워크벤치 / 파이프라인은 여기까지만 해도 다 돌아갑니다
 
+# 2-1. 학습/분산 컴포넌트. 이것도 GPU 없이 됩니다
+./scripts/install-rhoai.sh distributed   # Ray + Kueue + TrainingOperator + cert-manager
+
 # 3. GPU. 여기서부터 시간당 $0.83이 더 나갑니다
 ./scripts/gpu-node.sh up 1
 ./scripts/install-rhoai.sh gpu       # NFD + NVIDIA GPU Operator (10~20분)
@@ -603,7 +615,12 @@ source scripts/env.sh
 ./scripts/switch-backend.sh vllm
 ./scripts/verify-agent-stack.sh 3
 
-# 5. GPU만 반납. 클러스터는 그대로 두고 시간당 $0.83을 멈춥니다
+# 5. LoRA 파인튜닝. 서빙을 내리고 GPU를 씁니다
+./scripts/tune.sh run
+./scripts/tune.sh logs
+./scripts/tune.sh restore            # 서빙 복구. 자동으로 안 돌아옵니다
+
+# 6. GPU만 반납. 클러스터는 그대로 두고 시간당 $0.83을 멈춥니다
 ./scripts/gpu-node.sh down
 ```
 
@@ -1108,6 +1125,8 @@ ocp-aws-lab/
 │   │   └── dspa.yaml.tpl
 │   ├── 70-console/             # 앱 런처 등록 (ConsoleLink)
 │   │   └── consolelinks.yaml.tpl
+│   ├── 80-tuning/              # LoRA 파인튜닝 (PyTorchJob)
+│   │   └── 10-pytorchjob-lora.yaml.tpl
 │   └── 50-rhoai/
 │       ├── 10-model-storage.yaml.tpl
 │       └── 20-inferenceservice.yaml.tpl
@@ -1127,11 +1146,12 @@ ocp-aws-lab/
 │   ├── deploy-agent-stack.sh   # agent 스택 배포 + 기동 대기
 │   ├── verify-agent-stack.sh   # 검증 7종 + --baseline 기동시간 비교
 │   ├── gpu-node.sh             # GPU MachineSet up / down / delete
-│   ├── install-rhoai.sh        # NFD + NVIDIA GPU Operator + RHOAI
+│   ├── install-rhoai.sh        # NFD + GPU Operator + RHOAI + distributed(Ray/Kueue)
 │   ├── deploy-model.sh         # 가중치 다운로드 + InferenceService
 │   ├── switch-backend.sh       # LiteLLM api_base 전환 (llama.cpp <-> vLLM)
 │   ├── build-devimage.sh       # 개발 도구 이미지를 클러스터 안에서 빌드
 │   ├── setup-idp.sh            # htpasswd IdP. kubeadmin 말고 실제 사용자
+│   ├── tune.sh                 # LoRA 파인튜닝 run / logs / status / restore
 │   └── runlog.sh               # 실행 기록. new / note / res / run / done
 ├── docs/
 │   ├── storage.md              # gp3-csi / EFS / ODF 선택 기준

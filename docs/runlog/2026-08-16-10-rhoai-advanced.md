@@ -37,3 +37,51 @@
 
 - `04:59:19` A단계 완료: ray/trainingoperator Managed, kueue Unmanaged, cert-manager 설치. DSC Ready. RayCluster/RayJob/PyTorchJob/ClusterQueue/LocalQueue CRD 사용 가능. MaaS 는 3.4.3 DSC 가 spec.components.modelsasservice 를 unknown field 로 거부
 - `05:02:27` MaaS/llm-d 조사 결론: llm-d 지원 가속기는 H100/H200/B200/A100 뿐이고 L4(g6)는 목록에 없음. AWS P 인스턴스 쿼터가 0 vCPU 라 A100 기동 자체가 불가. Red Hat Connectivity Link 는 카탈로그에 없고 Community kuadrant 만 존재. MaaS 는 llm-d + Connectivity Link + Gateway TLS + User Workload Monitoring + 외부 PostgreSQL 을 요구. 둘 다 이 랩에서 불가. MaaS 활성화 경로는 spec.components.kserve.modelsAsService.managementState (최상위 컴포넌트가 아님)
+- `05:06:18` B단계 시작: GPU 1장. 튜닝(PyTorchJob LoRA) -> Ray. 서빙을 먼저 내려 GPU 를 비웁니다
+
+<details>
+<summary><code>./scripts/gpu-node.sh up 1</code> - OK (7s)</summary>
+
+```text
+
+== 사전 확인
+  OK    g6.xlarge 가 us-east-1a 에서 제공됨
+  OK    G/VT vCPU 쿼터 32 >= 필요 4
+
+== 기존 MachineSet 확장
+machineset.machine.openshift.io/lab1-cxfgs-gpu-us-east-1a scaled
+  OK    lab1-cxfgs-gpu-us-east-1a -> replicas=1
+
+  노드가 Ready 가 되기까지 5~10분 걸립니다.
+    watch oc get machine -n openshift-machine-api -l machine.openshift.io/cluster-api-machineset=lab1-cxfgs-gpu-us-east-1a
+
+  다음: ./scripts/install-rhoai.sh gpu    (NFD + NVIDIA GPU Operator)
+
+```
+
+</details>
+
+<details>
+<summary><code>./scripts/tune.sh run</code> - OK (7s)</summary>
+
+```text
+
+== 1. GPU 확보
+  OK    GPU 1 장
+  OK    서빙이 이미 내려가 있음
+
+== 2. 이전 잡 정리
+  이전 잡 없음
+
+== 3. 실행
+  OK    PyTorchJob lora-lab-style 적용
+
+  베이스 모델   Qwen/Qwen2.5-0.5B-Instruct
+  어댑터 이름   lab-style
+
+  로그:  ./scripts/tune.sh logs
+  상태:  ./scripts/tune.sh status
+
+```
+
+</details>

@@ -163,11 +163,14 @@ infraID 가 파일 이름에 들어가므로 세대끼리 덮어쓰지 않고, �
 2. render-manifests.sh   manifests/*.tpl -> clusters/<name>/manifests/
    deploy-agent-stack.sh llama.cpp · LiteLLM · Qdrant · Open WebUI · Phoenix
 3. install-rhoai.sh rhoai  Operator + DataScienceCluster. GPU 없이 됩니다
+   install-rhoai.sh distributed  Ray · Kueue · TrainingOperator. 이것도 GPU 없이 됩니다
 4. gpu-node.sh up        GPU MachineSet. 여기서부터 +$0.83/h
    install-rhoai.sh gpu  NFD + NVIDIA GPU Operator. 드라이버 빌드 10~20분
 5. deploy-model.sh       가중치 PVC + InferenceService
    switch-backend.sh vllm  LiteLLM api_base 한 줄 교체
 6. verify-agent-stack.sh 검증
+7. tune.sh run           LoRA 파인튜닝. 서빙을 내리고 GPU 를 씁니다
+   tune.sh restore       서빙 복구
 9. gpu-node.sh down      GPU 반납
    destroy-cluster.sh    클러스터 삭제
    verify-clean.sh       잔여 리소스 확인
@@ -180,8 +183,17 @@ GPU 를 쓸 계획이면 그 AZ 에 g6 가 있는지 `preflight.sh ai` 가 먼�
 
 **GPU(4번)는 RHOAI 설치(3번) 뒤에 옵니다. 순서를 바꾸지 마세요.**
 RHOAI 오퍼레이터 설치는 GPU 를 전혀 쓰지 않습니다.
+`distributed` 로 켜는 Ray·Kueue·TrainingOperator 도 마찬가지입니다.
 GPU 를 먼저 올려두면 그 30분이 시간당 $0.83 으로 계산됩니다.
-GPU 가 실제로 필요한 건 vLLM `InferenceService` 하나뿐입니다.
+GPU 가 실제로 필요한 건 vLLM `InferenceService` 와 학습 잡뿐입니다.
+
+**GPU 한 장은 서빙과 학습이 동시에 못 씁니다.**
+`nvidia.com/gpu` 는 나눠 쓸 수 없는 정수 자원입니다. 0.1 장을 요청할 수 없습니다.
+`tune.sh run` 이 서빙을 `replicas=0` 으로 내리고 시작하고, 자동으로 되돌리지 않습니다.
+**학습이 끝나면 `tune.sh restore` 를 직접 부르세요.** 안 하면 모델 엔드포인트가 죽어 있습니다.
+
+**MaaS 와 llm-d 는 이 랩에서 못 합니다.** 지원 가속기 목록에 L4 가 없습니다.
+매번 다시 조사하지 않도록 근거를 [docs/maas-llm-d.md](docs/maas-llm-d.md) 에 적어 두었습니다.
 
 ---
 
@@ -252,6 +264,17 @@ npx markdownlint-cli2 "**/*.md"
 
 `runlog.sh` 가 **생성하는** 마크다운도 린트 대상입니다.
 블록을 이어 붙일 때는 `append_block` 을 쓰세요. 빈 줄을 손으로 세면 반드시 어긋납니다.
+
+### 스크린샷 가이드 (`docs/guide/`)
+
+화면으로 확인하는 단계를 새로 만들었으면 여기에 항목을 추가합니다.
+스크린샷은 `docs/guide/images/NN-이름.jpg`, 설명은 `docs/guide/README.md` 입니다.
+
+- **바뀌는 값을 판정 기준으로 쓰지 마세요.** 파드 이름과 도메인은 세대마다 달라집니다.
+  `Running` 인지, 항목이 몇 개인지, `Ready` 가 `2/2` 인지처럼 **구조와 상태**를 기준으로 씁니다.
+- 각 항목은 `확인 시점` / `이 화면에서 확인할 것들입니다.` / `어긋나면` 세 부분입니다.
+- 비밀번호나 토큰이 찍힌 화면은 넣지 마세요. `docs/` 는 커밋됩니다.
+- 인증서 경고나 로그인 화면처럼 **막히는 화면도 가치가 있습니다.** 다들 거기서 멈추기 때문입니다.
 
 ### 다이어그램
 
