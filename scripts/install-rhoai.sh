@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Red Hat OpenShift AI 와 GPU 스택을 설치합니다.
 #
-#   ./scripts/install-rhoai.sh gpu      NFD + NVIDIA GPU Operator (GPU 노드 붙인 뒤)
-#   ./scripts/install-rhoai.sh rhoai    RHOAI 오퍼레이터 + DataScienceCluster
+#   ./scripts/install-rhoai.sh gpu          NFD + NVIDIA GPU Operator (GPU 노드 붙인 뒤)
+#   ./scripts/install-rhoai.sh rhoai        RHOAI 오퍼레이터 + DataScienceCluster
+#   ./scripts/install-rhoai.sh distributed  ray + kueue + trainingoperator 켜기
 #   ./scripts/install-rhoai.sh status
 #
 # ------------------------------------------------------------------
@@ -306,6 +307,186 @@ rhoai)
   ;;
 
 # ==================================================================
+# 분산 학습/스케줄링 컴포넌트를 켭니다.
+#
+# rhoai 액션은 이것들을 일부러 Removed 로 둡니다. 서빙만 할 거면 자원 낭비라서입니다.
+# 튜닝이나 Ray 를 실제로 해 볼 때만 이 액션으로 켭니다.
+#
+# ------------------------------------------------------------------
+# GPU 앞에 두는 이유
+# ------------------------------------------------------------------
+# 여기서 하는 일에 GPU 는 한 장도 필요 없습니다.
+# 오퍼레이터 설치와 컨트롤러 기동이 전부입니다.
+# GPU 를 먼저 올려두면 이 시간이 그대로 시간당 $0.83 으로 계산됩니다.
+# RHOAI 를 GPU 앞에 둔 것과 같은 이유입니다.
+#
+# ------------------------------------------------------------------
+# 컴포넌트마다 외부 의존이 다릅니다
+# ------------------------------------------------------------------
+# 실측(RHOAI 3.4.3, OCP 4.22.6):
+#   ray               번들. 추가 오퍼레이터 없음
+#   trainingoperator  번들. PyTorchJob 을 제공합니다
+#   kueue             Red Hat 빌드 kueue-operator 를 따로 깔아야 합니다
+#   trainer           JobSet 오퍼레이터가 필요한데 이 카탈로그에 없습니다
+#
+# 그래서 trainer 는 여기서 켜지 않습니다.
+# 켜면 DSC 가 TrainerReady=False 로 멈추고 클러스터 전체가 Not Ready 가 됩니다.
+# 튜닝은 trainingoperator 의 PyTorchJob 으로 합니다.
+distributed)
+  head1 "1. 전제 오퍼레이터"
+
+  # cert-manager 가 먼저입니다.
+  #
+  # Kueue 오퍼레이터가 웹훅 인증서를 cert-manager 로 발급받습니다.
+  # 없으면 Kueue CR 이 이렇게 멈춥니다.
+  #   DependenciesAvailable=False
+  #   cert-manager is required but not installed
+  #
+  # llm-d(LLMInferenceService)도 같은 것을 요구합니다. DSC 상태에 이렇게 남습니다.
+  #   KserveLLMInferenceServiceDependencies=False
+  #   Red Hat Connectivity Link and cert-manager operator not installed
+  # 공통 전제라 여기서 한 번 깔아 둡니다.
+  if oc get csv -A 2>/dev/null | grep -q cert-manager; then
+    ok "cert-manager 이미 설치됨"
+  else
+    subscribe openshift-cert-manager-operator cert-manager-operator all
+    wait_csv cert-manager-operator openshift-cert-manager-operator 600 >/dev/null
+    ok "cert-manager 설치"
+  fi
+
+  # kueue 는 DSC 만 켜서는 안 됩니다. 오퍼레이터가 먼저 있어야 합니다.
+  # 권장 네임스페이스는 패키지가 알려 줍니다. 하드코딩하지 않습니다.
+  KUEUE_NS=$(oc get packagemanifest kueue-operator -n openshift-marketplace -o jsonpath\
+='{.status.channels[0].currentCSVDesc.annotations.operatorframework\.io/suggested-namespace}' 2>/dev/null)
+  KUEUE_NS="${KUEUE_NS:-openshift-kueue-operator}"
+
+  if oc get csv -n "$KUEUE_NS" 2>/dev/null | grep -q kueue; then
+    ok "kueue-operator 이미 설치됨 ($KUEUE_NS)"
+  else
+    # all(전체 네임스페이스) 이어야 합니다.
+    # kueue-operator 는 OwnNamespace 설치 모드를 지원하지 않습니다.
+    # own 으로 만들면 CSV 가 Failed 로 떨어지고 사유는 CSV 안에만 남습니다.
+    #   UnsupportedOperatorGroup: OwnNamespace InstallModeType not supported
+    # Subscription 은 정상으로 보여서 오해하기 쉽습니다. 실제로 한 번 겪었습니다.
+    subscribe kueue-operator "$KUEUE_NS" all
+    wait_csv "$KUEUE_NS" kueue-operator 600 >/dev/null
+    ok "kueue-operator 설치 ($KUEUE_NS)"
+  fi
+
+  # Kueue CR 은 우리가 만들지 않습니다.
+  # kueue 컴포넌트를 Unmanaged 로 켜면 DataScienceCluster 가
+  # default-kueue 라는 Kueue CR 을 스스로 만듭니다(ownerReference 가 DSC 입니다).
+  # 우리가 alm-examples 로 하나 더 만들면 CR 이 둘이 됩니다.
+
+  head1 "2. DataScienceCluster 컴포넌트"
+
+  DSC_NAME=$(oc get datasciencecluster -o jsonpath='{.items[0].metadata.name}' 2>/dev/null) \
+    || die "DataScienceCluster 가 없습니다. 먼저: $0 rhoai"
+  [[ -n "$DSC_NAME" ]] || die "DataScienceCluster 가 없습니다. 먼저: $0 rhoai"
+
+  # oc apply 로 통째로 덮지 않고 컴포넌트별 merge patch 를 씁니다.
+  #
+  # apply 는 last-applied-configuration 과 3-way 병합을 합니다.
+  # rhoai 액션이 예전에 넣어 둔 kserve.defaultDeploymentMode 가 이 버전에서
+  # rawDeploymentServiceConfig 로 바뀌었는데, apply 는 그걸 null 로 지우려 듭니다.
+  # 내가 건드리지도 않은 필드가 같이 날아가는 겁니다.
+  #
+  # 컴포넌트를 하나씩 patch 하면 실패한 것만 실패하고 나머지는 반영됩니다.
+  # 어느 컴포넌트가 거부됐는지도 그 자리에서 드러납니다.
+  #
+  # ------------------------------------------------------------------
+  # kueue 만 Managed 가 아닙니다
+  # ------------------------------------------------------------------
+  # webhook 이 이렇게 거부합니다.
+  #   Managed is no longer supported as a managementState
+  # CRD 스키마는 Managed 를 허용하는데 webhook 이 막습니다.
+  # 스키마만 보고 판단하면 못 찾습니다.
+  #
+  # Kueue 는 Red Hat 빌드 오퍼레이터가 따로 관리합니다.
+  # RHOAI 는 그 위에 연동만 얹으므로 Unmanaged 가 맞는 값입니다.
+  # 다른 컴포넌트(ray, trainingoperator)는 그대로 Managed 입니다.
+  patch_component() {
+    local c="$1" state="$2" out
+    out=$(oc patch datasciencecluster "$DSC_NAME" --type=merge \
+          -p "{\"spec\":{\"components\":{\"$c\":{\"managementState\":\"$state\"}}}}" 2>&1)
+    if grep -q patched <<<"$out"; then
+      ok "$c -> $state"
+    else
+      bad "$c -> $state 실패"
+      sed 's/^/      /' <<<"$(tr '\n' ' ' <<<"$out" | sed 's/.*denied the request: //' | cut -c1-160)"
+    fi
+  }
+
+  patch_component ray Managed
+  patch_component trainingoperator Managed
+  patch_component kueue Unmanaged
+
+  # trainer 는 켜지 않습니다. JobSet 오퍼레이터가 이 카탈로그에 없습니다.
+  # 켜면 TrainerReady=False 로 DSC 전체가 Not Ready 가 됩니다.
+  ok "trainer 는 건너뜁니다 (JobSet 오퍼레이터 없음)"
+
+  head1 "3. 컴포넌트별 준비 상태"
+  info "컨트롤러 기동에 3~5분 걸립니다."
+
+  # Kueue 는 기동 순서 경합이 있습니다.
+  #
+  # DSC 가 Kueue CR 을 만드는 시점에 kueue-webhook-service 가 아직 없으면
+  # ClusterQueue 생성이 변환 웹훅에서 실패합니다.
+  #   conversion webhook for kueue.x-k8s.io/v1beta1, Kind=ClusterQueue failed:
+  #   service "kueue-webhook-service" not found
+  # ClusterQueue 는 v1beta2 가 storage 라 v1beta1 요청은 변환을 거칩니다.
+  #
+  # 문제는 서비스가 생긴 뒤에도 스스로 다시 시도하지 않는다는 점입니다.
+  # Error 로 굳어 있으면 어노테이션을 건드려 재조정을 유도합니다.
+  kueue_nudge_if_stuck() {
+    local msg
+    msg=$(oc get kueue -o json 2>/dev/null \
+          | jq -r '.items[0].status.conditions[]?|select(.type=="Ready" and .status!="True")|.message' 2>/dev/null)
+    if grep -q "webhook" <<<"${msg:-}"; then
+      local name
+      name=$(oc get kueue -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+      [[ -n "$name" ]] || return 0
+      oc annotate kueue "$name" "lab.retry=$(date +%s)" --overwrite >/dev/null 2>&1
+      info "Kueue 가 웹훅 경합으로 멈춰 있어 재조정을 유도했습니다"
+    fi
+  }
+
+  # DSC 전체 phase 만 보면 어느 컴포넌트가 걸렸는지 알 수 없습니다.
+  # 컴포넌트별 조건을 따로 봅니다.
+  for i in $(seq 1 40); do
+    READY=$(oc get datasciencecluster -o json 2>/dev/null \
+      | jq -r '[.items[0].status.conditions[]
+                | select(.type|test("^(Ray|Kueue|TrainingOperator)Ready$"))
+                | select(.status=="True")] | length')
+    [[ "$READY" == "3" ]] && break
+    # 웹훅이 준비될 시간을 준 뒤부터 경합을 확인합니다.
+    (( i > 6 )) && (( i % 4 == 0 )) && kueue_nudge_if_stuck
+    printf "."
+    sleep 15
+  done
+  printf "\n"
+
+  oc get datasciencecluster -o json 2>/dev/null \
+    | jq -r '.items[0].status.conditions[]
+             | select(.type|test("^(Ray|Kueue|TrainingOperator|Trainer)Ready$"))
+             | "  \(.type)=\(.status)  \(.message // "")"'
+
+  head1 "4. 쓸 수 있게 된 것"
+  for crd in rayclusters.ray.io rayjobs.ray.io pytorchjobs.kubeflow.org \
+             clusterqueues.kueue.x-k8s.io localqueues.kueue.x-k8s.io; do
+    if oc get crd "$crd" >/dev/null 2>&1; then
+      ok "$crd"
+    else
+      warn "$crd 없음"
+    fi
+  done
+  printf "\n"
+  info "다음: PyTorchJob 으로 LoRA 튜닝. GPU 가 필요합니다:"
+  info "  ./scripts/gpu-node.sh up 1"
+  printf "\n"
+  ;;
+
+# ==================================================================
 status)
   head1 "오퍼레이터"
   for ns in openshift-nfd nvidia-gpu-operator redhat-ods-operator; do
@@ -331,5 +512,5 @@ status)
   printf "\n"
   ;;
 
-*) die "사용법: $0 gpu | rhoai | status" ;;
+*) die "사용법: $0 gpu | rhoai | distributed | status" ;;
 esac
