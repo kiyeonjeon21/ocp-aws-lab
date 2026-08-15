@@ -119,10 +119,15 @@ spec:
           resources:
             requests:
               cpu: 100m
-              memory: 512Mi
+              memory: 1Gi
             limits:
               cpu: "1"
-              memory: 1Gi
+              # 1Gi 로 뒀다가 기동 7초 만에 OOMKilled(exit 137) 났습니다.
+              # LiteLLM 은 import 시점에 프로바이더 모듈을 전부 로드해서
+              # 요청을 한 번도 안 받아도 1GB 를 넘깁니다.
+              # 로그가 한 줄도 안 남고 죽어서 원인이 안 보입니다.
+              # 그때는 컨테이너 상태의 lastState.terminated.reason 을 보세요.
+              memory: 2Gi
           volumeMounts:
             - name: config
               mountPath: /etc/litellm

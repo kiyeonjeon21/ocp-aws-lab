@@ -131,12 +131,31 @@ if [[ -f "$CLUSTER_DIR/auth/kubeconfig" ]] \
    && KUBECONFIG="$CLUSTER_DIR/auth/kubeconfig" oc whoami >/dev/null 2>&1; then
   export KUBECONFIG="$CLUSTER_DIR/auth/kubeconfig"
   for d in "$OUT_ROOT"/*/; do
-    # 50-rhoai 는 오퍼레이터가 설치되기 전에는 CRD 가 없어 실패합니다.
-    # 그건 오류가 아니라 아직 순서가 아닌 것뿐이라 경고만 남깁니다.
-    if oc apply --dry-run=server -R -f "$d" >/dev/null 2>&1; then
+    # 걸러야 하는 오류가 두 종류 있습니다. 둘 다 진짜 문제가 아닙니다.
+    #
+    # 1. namespaces "..." not found
+    #    --dry-run=server 는 네임스페이스를 실제로 만들지 않습니다.
+    #    그래서 같은 apply 안에서 그 네임스페이스에 들어갈 리소스가 전부 실패합니다.
+    #    이걸 안 거르면 이 검사는 구조상 절대 통과하지 못하고,
+    #    항상 뜨는 경고는 사람이 무시하게 되어 없는 것보다 나쁩니다.
+    #
+    # 2. no matches for kind "..."
+    #    50-rhoai 는 오퍼레이터를 깔기 전에는 CRD 가 없습니다. 아직 순서가 아닌 것뿐입니다.
+    #
+    # 끝의 || true 가 필요합니다.
+    # grep 은 걸러낼 게 없으면(= 오류가 전부 무해했으면) exit 1 을 냅니다.
+    # set -e + pipefail 이라 그게 명령 치환 실패로 전파되어 스크립트가 죽습니다.
+    # 검증이 통과할 때만 죽는, 제일 찾기 어려운 형태입니다.
+    ERR=$(oc apply --dry-run=server -R -f "$d" 2>&1 >/dev/null \
+          | grep -v 'namespaces ".*" not found' \
+          | grep -v 'no matches for kind' \
+          | grep -v 'ensure CRDs are installed' || true)
+    if [[ -z "$ERR" ]]; then
       ok "서버 검증 통과  $(basename "$d")"
     else
-      warn "서버 검증 실패  $(basename "$d") (CRD 가 아직 없을 수 있습니다)"
+      bad "서버 검증 실패  $(basename "$d")"
+      sed 's/^/      /' <<<"$ERR" | head -5 >&2
+      die "매니페스트를 고치세요. 렌더링 결과물이 아니라 manifests/ 아래 템플릿을 고쳐야 합니다."
     fi
   done
 fi

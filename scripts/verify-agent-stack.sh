@@ -170,12 +170,17 @@ for r in open-webui phoenix; do
     skip "$r Route 없음"
     continue
   fi
-  CODE=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "https://$H/" 2>/dev/null)
+  # -k 가 필요합니다.
+  # *.apps 의 인증서는 클러스터 ingress CA 가 서명한 것이라 시스템 신뢰 저장소에 없습니다.
+  # 빼면 TLS 검증 실패로 000 이 나오고, DNS 나 라우터 문제로 오해하게 됩니다.
+  # 실제로 그렇게 오진했습니다. 수동 curl 은 -k 를 썼는데 스크립트만 빠져 있었습니다.
+  CODE=$(curl -sSk -o /dev/null -w '%{http_code}' --max-time 20 "https://$H/" 2>/dev/null)
   if [[ "$CODE" =~ ^(200|302|307)$ ]]; then
     pass "$r  https://$H  ($CODE)"
   else
     fail "$r  https://$H  응답 $CODE"
-    info "    Route DNS 전파에 몇 분 걸릴 수 있습니다: dig +short $H"
+    info "    000 이면 이름 해석 또는 연결 실패입니다: dig +short $H"
+    info "    라우터는 워커에만 뜹니다. ELB 에서 마스터가 OutOfService 인 건 정상입니다"
   fi
 done
 fi

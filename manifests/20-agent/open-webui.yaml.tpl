@@ -18,6 +18,17 @@
 # 이 랩에서 얻어갈 숫자가 그겁니다.
 ---
 apiVersion: v1
+kind: Secret
+metadata:
+  name: open-webui-secret
+  namespace: ${AGENT_NAMESPACE}
+type: Opaque
+stringData:
+  # 세션 쿠키 서명에 쓰입니다. 랩용 고정값입니다.
+  # 실제 환경이라면 무작위로 만들어 넣으세요.
+  secret-key: lab-fixed-not-a-real-secret
+---
+apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: open-webui-data
@@ -109,6 +120,20 @@ spec:
             # Route 가 퍼블릭 DNS 로 열려 있으므로 실제 환경에서는 절대 끄지 마세요.
             - name: WEBUI_AUTH
               value: "false"
+
+            # 이게 없으면 기동 스크립트가 키를 만들어 작업 디렉토리에 쓰려 합니다.
+            #   start.sh: line 46: .webui_secret_key: Permission denied
+            # OCP 는 이미지에 적힌 USER 를 무시하고 네임스페이스마다 배정된
+            # 임의 UID 로 컨테이너를 돌립니다. 그 UID 는 /app 에 쓸 권한이 없습니다.
+            # 값을 미리 주면 파일을 만들 이유가 없어져서 문제가 사라집니다.
+            #
+            # 이미지가 "루트로 돌 것" 을 전제로 만들어졌을 때 나오는 전형적인 증상이고,
+            # 폐쇄망이든 아니든 OCP 에서는 똑같이 납니다.
+            - name: WEBUI_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: open-webui-secret
+                  key: secret-key
             - name: DATA_DIR
               value: "/app/backend/data"
           readinessProbe:
