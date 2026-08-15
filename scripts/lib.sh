@@ -104,6 +104,8 @@ load_ai_env() {
   # 개발 도구 이미지. build-devimage.sh 로 만든 뒤 이 값을 내부 레지스트리 경로로 바꿉니다.
   # 기본값은 빌드 전에도 파드가 뜨도록 python 이미지를 그대로 씁니다(도구는 없음).
   : "${IMAGE_DEVTOOLS:=$IMAGE_PYTHON}"
+  # RHOAI 3.4 는 번들 MinIO 를 걷어냈습니다. DSPA 의 minio.image 가 required 라 직접 줍니다.
+  : "${IMAGE_MINIO:=quay.io/minio/minio:latest}"
 
   # 모델 가중치.
   # 인터넷이 있는 클러스터라서 initContainer 가 런타임에 받아옵니다.
@@ -139,7 +141,7 @@ load_ai_env() {
 
   export AGENT_NAMESPACE RHOAI_NAMESPACE STORAGE_CLASS AGENT_OFFLINE
   export IMAGE_LLAMA IMAGE_LITELLM IMAGE_QDRANT IMAGE_OPENWEBUI IMAGE_PHOENIX
-  export IMAGE_UBI IMAGE_PYTHON IMAGE_DEVTOOLS
+  export IMAGE_UBI IMAGE_PYTHON IMAGE_DEVTOOLS IMAGE_MINIO
   export MODEL_NAME MODEL_URL MODEL_HF_REPO
   export VLLM_MODEL_NAME VLLM_GPU_UTIL VLLM_MAX_LEN
   export GPU_INSTANCE_TYPE GPU_VOLUME_SIZE

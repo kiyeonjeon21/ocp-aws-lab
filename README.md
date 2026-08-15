@@ -1055,6 +1055,10 @@ ocp-aws-lab/
 │   ├── 30-devtools/            # 클러스터 안 개발 환경
 │   │   ├── Containerfile       # nvim · tmux · rg · fd · aider
 │   │   └── coding-agent.yaml.tpl
+│   ├── 40-langgraph/           # 직접 만든 agent (ReAct + 체크포인터)
+│   │   └── langgraph.yaml.tpl
+│   ├── 60-pipelines/           # Data Science Pipelines + MinIO
+│   │   └── dspa.yaml.tpl
 │   └── 50-rhoai/
 │       ├── 10-model-storage.yaml.tpl
 │       └── 20-inferenceservice.yaml.tpl
@@ -1078,6 +1082,7 @@ ocp-aws-lab/
 │   ├── deploy-model.sh         # 가중치 다운로드 + InferenceService
 │   ├── switch-backend.sh       # LiteLLM api_base 전환 (llama.cpp <-> vLLM)
 │   ├── build-devimage.sh       # 개발 도구 이미지를 클러스터 안에서 빌드
+│   ├── setup-idp.sh            # htpasswd IdP. kubeadmin 말고 실제 사용자
 │   └── runlog.sh               # 실행 기록. new / note / res / run / done
 ├── docs/
 │   ├── storage.md              # gp3-csi / EFS / ODF 선택 기준
@@ -1103,9 +1108,11 @@ ocp-aws-lab/
 - [x] **GPU MachineSet 실제 검증** — 워커 MachineSet 복제로 g6.xlarge 생성
 - [x] **RHOAI 3.4.3 + KServe 서빙 실제 검증** — `alm-examples` 추출, vLLM 런타임 9개 중 CUDA 선택
 - [x] **클러스터 안 코딩 에이전트** — nvim/tmux/LazyVim + aider 가 내부 Service 로 GPU 모델 호출
-- [ ] **IdP 연동** — 지금은 `kubeadmin` 뿐. htpasswd 또는 Keycloak
-- [ ] **LangGraph 기반 agent 플랫폼** — 상태 저장(체크포인터)까지 포함
-- [ ] **Data Science Pipelines 실습** — S3 연동 + 파이프라인 1개
+- [x] **IdP 연동** — htpasswd. `devuser` 로그인 확인. 폐쇄망에서도 외부 의존 없이 동작
+- [x] **LangGraph agent** — ReAct 그래프 + SQLite 체크포인터. 상태가 파드 재시작을 넘어 남음
+- [x] **Data Science Pipelines** — DSPA + MinIO + MariaDB. iris 샘플 Succeeded, MinIO 에 산출물 확인
+- [ ] **SSO 통합** — Open WebUI / LangGraph / Phoenix 는 지금 OCP 로그인과 무관. oauth-proxy 필요
+- [ ] **Keycloak(RHBK)** — htpasswd 다음 단계. OIDC 로 외부 IdP 연동
 - [ ] **파인튜닝(LoRA)** — GPU 1대에서는 서빙과 동시 불가. 순서를 나눠야 함
 - [ ] `--baseline` 측정값을 `ocp-airgap-lab`의 같은 검사와 나란히 기록
 - [ ] RHOAI Data Science Pipelines 실습 (Elyra 파이프라인 1개)
