@@ -162,10 +162,29 @@ fi
 fi
 
 # ---------------------------------------------------------------- 5
+# oauth-proxy 를 붙인 Route 는 기대값이 반대입니다.
+# 익명 요청에 200 이 나오면 그건 통과가 아니라 구멍입니다.
+# SSO 를 붙인 직후 이 검사를 그대로 두었다가 403 을 실패로 세는 일이 있었습니다.
+#
+# 어느 Route 가 보호되는지는 하드코딩하지 않습니다.
+# Route -> Service -> selector 가 고르는 파드에 oauth-proxy 컨테이너가 있는지로 판별합니다.
+# Deployment 이름을 짐작하지 않으므로 사이드카를 새로 붙여도 그대로 동작합니다.
+sso_protected() {
+  local svc="$1" sel
+  sel=$(oc get svc "$svc" -n "$NS" -o json 2>/dev/null \
+        | jq -r '.spec.selector // {} | to_entries | map("\(.key)=\(.value)") | join(",")')
+  [[ -z "$sel" ]] && return 1
+  oc get pods -n "$NS" -l "$sel" \
+     -o jsonpath='{.items[*].spec.containers[*].name}' 2>/dev/null \
+     | grep -qw oauth-proxy
+}
+
 if run 5; then
 head1 "5. Route"
-for r in open-webui phoenix; do
+# Route 목록도 클러스터에서 읽습니다. 컴포넌트를 추가해도 검사에서 빠지지 않습니다.
+for r in $(oc get route -n "$NS" -o jsonpath='{range .items[*]}{.metadata.name} {end}' 2>/dev/null); do
   H=$(oc get route "$r" -n "$NS" -o jsonpath='{.spec.host}' 2>/dev/null)
+  SVC=$(oc get route "$r" -n "$NS" -o jsonpath='{.spec.to.name}' 2>/dev/null)
   if [[ -z "$H" ]]; then
     skip "$r Route 없음"
     continue
@@ -175,12 +194,33 @@ for r in open-webui phoenix; do
   # 빼면 TLS 검증 실패로 000 이 나오고, DNS 나 라우터 문제로 오해하게 됩니다.
   # 실제로 그렇게 오진했습니다. 수동 curl 은 -k 를 썼는데 스크립트만 빠져 있었습니다.
   CODE=$(curl -sSk -o /dev/null -w '%{http_code}' --max-time 20 "https://$H/" 2>/dev/null)
-  if [[ "$CODE" =~ ^(200|302|307)$ ]]; then
-    pass "$r  https://$H  ($CODE)"
+
+  if sso_protected "$SVC"; then
+    if [[ "$CODE" == "200" ]]; then
+      fail "$r  https://$H  인증 없이 200. oauth-proxy 를 통과하지 못했습니다"
+      continue
+    fi
+    if [[ ! "$CODE" =~ ^(302|403)$ ]]; then
+      fail "$r  https://$H  응답 $CODE (403 또는 302 여야 합니다)"
+      continue
+    fi
+    # 막는 것만으로는 부족합니다. 로그인 화면으로 실제로 넘겨야 쓸 수 있습니다.
+    # oauth-proxy 가 OAuth 서버를 못 찾으면 여기서 빈 값이 나옵니다.
+    LOC=$(curl -sSk -o /dev/null -w '%{redirect_url}' --max-time 20 "https://$H/oauth/start" 2>/dev/null)
+    case "$LOC" in
+      *oauth-openshift*) pass "$r  https://$H  SSO 보호 ($CODE, 로그인으로 리다이렉트)" ;;
+      *) fail "$r  https://$H  익명 차단은 되는데 /oauth/start 가 로그인으로 안 넘깁니다: ${LOC:-빈 값}" ;;
+    esac
   else
-    fail "$r  https://$H  응답 $CODE"
-    info "    000 이면 이름 해석 또는 연결 실패입니다: dig +short $H"
-    info "    라우터는 워커에만 뜹니다. ELB 에서 마스터가 OutOfService 인 건 정상입니다"
+    # 보호가 없는 Route 는 "라우터가 앱까지 닿나" 만 봅니다.
+    # 401 도 통과입니다. 앱이 자체 키를 요구하는 상태이고, 라우팅은 성공한 것입니다.
+    if [[ "$CODE" =~ ^(200|302|307|401)$ ]]; then
+      pass "$r  https://$H  ($CODE, 인증 없음)"
+    else
+      fail "$r  https://$H  응답 $CODE"
+      info "    000 이면 이름 해석 또는 연결 실패입니다: dig +short $H"
+      info "    라우터는 워커에만 뜹니다. ELB 에서 마스터가 OutOfService 인 건 정상입니다"
+    fi
   fi
 done
 fi
