@@ -728,6 +728,31 @@ openshift-install wait-for bootstrap-complete --dir=$CLUSTER_DIR
 </details>
 
 <details>
+<summary><b><code>source scripts/env.sh</code>를 했는데도 엉뚱한 IAM 유저로 붙음 (zsh)</b></summary>
+
+`AWS_PROFILE`이 실제로 잡혔는지 확인하세요.
+
+```bash
+source scripts/env.sh
+echo "$AWS_PROFILE"
+aws sts get-caller-identity --query Arn --output text
+```
+
+`ocp-lab` / `...user/ocp-lab-admin`이 나와야 정상입니다.
+
+과거에 이게 **zsh에서 조용히 실패**했습니다.
+`lib.sh`가 자기 위치를 `${BASH_SOURCE[0]}`로 찾는데 zsh에는 그 변수가 없습니다.
+`REPO_ROOT`가 한 단계 위를 가리키면서 `.env`를 못 찾고, `AWS_PROFILE`이 export되지 않은 채로 넘어갑니다.
+그러면 `aws`도 `openshift-install`도 `default` 프로파일로 붙습니다.
+
+스크립트(`./scripts/*.sh`)는 shebang이 bash라 영향이 없었고, **손으로 `source`할 때만** 터졌습니다.
+`aws`가 조용히 다른 계정으로 동작하는 종류라 알아차리기 어렵습니다.
+
+지금은 `lib.sh`와 `env.sh`가 zsh의 `${(%):-%x}`를 함께 봅니다.
+새 셸을 쓰신다면 위 세 줄로 한 번 확인하세요.
+</details>
+
+<details>
 <summary><b>설치가 <code>waiting for bootstrap to complete</code>에서 멈춤</b></summary>
 
 ```bash

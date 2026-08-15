@@ -2,7 +2,23 @@
 # 모든 스크립트가 source 하는 공통 라이브러리.
 # 여기서는 set -e 를 걸지 않습니다. 호출하는 쪽에서 겁니다.
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# 이 파일이 어디 있는지 알아냅니다.
+#
+# bash 는 BASH_SOURCE, zsh 는 %x 로 "지금 읽고 있는 파일"을 알려줍니다.
+# BASH_SOURCE 만 쓰면 zsh 에서 빈 문자열이 되고, REPO_ROOT 가 한 단계 위를
+# 가리켜 .env 를 못 찾습니다. 그러면 AWS_PROFILE 이 안 잡히고,
+# 그 상태로 aws 를 부르면 조용히 default 프로파일로 붙습니다.
+# 이 레포가 막으려는 사고가 정확히 그것이라, 여기가 그 방어선의 시작입니다.
+#
+# 스크립트는 shebang 덕분에 항상 bash 로 돌지만,
+# 사용자가 손으로 치는 'source scripts/env.sh' 는 로그인 셸(zsh)로 들어옵니다.
+if [ -n "${ZSH_VERSION:-}" ]; then
+  _lib_src="${(%):-%x}"
+else
+  _lib_src="${BASH_SOURCE[0]}"
+fi
+REPO_ROOT="$(cd "$(dirname "$_lib_src")/.." && pwd)"
+unset _lib_src
 export REPO_ROOT
 
 # 레포에 받아둔 openshift-install / oc 를 시스템 PATH보다 우선합니다.

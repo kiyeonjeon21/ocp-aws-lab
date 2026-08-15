@@ -150,6 +150,7 @@ GPU 를 설치 직후에 붙이면 실제로 쓰기 전까지 몇 시간을 그�
 - 클러스터를 건드리면 `need_cluster` 를 먼저 부릅니다. `KUBECONFIG` 를 고정하지 않으면 다른 클러스터에 apply 할 수 있습니다.
 - `set -euo pipefail` 이 기본입니다. 단 개별 검사 실패로 전체가 죽으면 안 되는 검증 스크립트는 `-e` 를 뺍니다.
 - 출력은 `lib.sh` 의 `ok` / `warn` / `bad` / `info` / `head1` / `die` 를 씁니다. 직접 `echo` 로 색을 칠하지 마세요.
+- **`source` 되는 파일(`lib.sh`, `env.sh`)에 bash 전용 문법을 쓰지 마세요.** 사용자의 로그인 셸은 zsh 이고, `source scripts/env.sh` 는 그쪽으로 들어옵니다. `${BASH_SOURCE[0]}` 하나 때문에 `AWS_PROFILE` 이 조용히 안 잡힌 적이 있습니다. 고칠 때는 zsh 와 bash 양쪽에서 확인하세요.
 - 값을 반환하는 함수는 **stdout 에 값만** 냅니다. 진행 표시는 `>&2` 로 보냅니다. `install-rhoai.sh` 의 `wait_csv` 가 그 예입니다.
 
 ### 오퍼레이터 CR 은 클러스터에서 꺼냅니다
@@ -248,6 +249,7 @@ mmdc -i diagram.mmd -o out.png -b transparent -t dark -s 2
 | 증상 | 원인 |
 | --- | --- |
 | `openshift-install` 이 엉뚱한 IAM 유저로 붙음 | `source scripts/env.sh` 를 안 했음 |
+| `source` 를 했는데도 엉뚱한 유저로 붙음 | 셸 차이. `echo $AWS_PROFILE` 로 확인하세요. `ocp-lab` 이 아니면 로드가 실패한 것입니다 |
 | 설치가 bootstrap 에서 멈춤 | 보안 그룹, NAT 접근 불가, Route 53 전파 지연, vCPU 쿼터 |
 | GPU MachineSet 을 만들었는데 Machine 이 Provisioning 에서 멈춤 | 그 AZ 에 해당 타입이 없음. `ap-northeast-2b` 에 g6 없음 |
 | 노드는 Ready 인데 `nvidia.com/gpu` 가 `<none>` | 드라이버 미완성이거나 NFD 가 라벨을 안 붙임 |
