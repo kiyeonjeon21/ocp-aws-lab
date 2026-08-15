@@ -134,11 +134,82 @@ Phoenix 는 원래 로그인 개념이 없는 도구입니다.
 
 ---
 
+## 5. RHOAI 에서 학습 잡을 어디서 보나
+
+![Workload metrics](images/05-workload-metrics.jpg)
+
+확인 시점: `install-rhoai.sh distributed` 로 Kueue 배선을 마치고 학습이나 Ray 를 돌린 뒤.
+
+**주소부터 다릅니다.**
+RHOAI 3.4 의 대시보드는 `data-science-gateway` 를 통해 나갑니다.
+
+```bash
+oc get route -A | grep data-science-gateway
+# openshift-ingress/data-science-gateway   rh-ai.apps.<cluster>.<domain>
+```
+
+예전 `rhods-dashboard-redhat-ods-applications.apps...` 도 살아 있지만 위가 정식입니다.
+
+### 화면이 셋으로 나뉩니다
+
+여기가 헷갈리는 지점입니다. 세 화면이 각각 다른 것을 봅니다.
+
+| 화면 | 보는 대상 | 우리 워크로드가 뜨나 |
+| --- | --- | --- |
+| Develop & train > Pipelines | Kubeflow Pipelines | 안 뜹니다. iris 샘플만 |
+| Develop & train > Jobs | **TrainJob, RayJob** | 안 뜹니다 (아래 설명) |
+| Observe & monitor > **Workload metrics** | Kueue `Workload` | **여기 뜹니다** |
+
+LoRA 학습은 파이프라인이 아니라 `PyTorchJob` 입니다. Pipelines 에 안 나오는 게 맞습니다.
+
+Jobs 화면은 안내문에 그대로 적혀 있습니다.
+
+```text
+View and manage the progress of self-terminating jobs such as TrainJobs and RayJobs.
+No TrainJobs or RayJobs have been found in this project.
+```
+
+우리가 만든 건 `PyTorchJob` 과 `RayCluster` 라 둘 다 이 목록에 없습니다.
+
+- `TrainJob` 은 Kubeflow Trainer v2 의 CR 입니다. `trainer` 컴포넌트가 필요하고,
+  그건 JobSet 오퍼레이터를 요구하는데 이 카탈로그에 없습니다. 확인해 보세요.
+
+  ```bash
+  oc get crd trainjobs.trainer.kubeflow.org   # 없음
+  oc get crd rayjobs.ray.io                   # 있음
+  ```
+
+- `RayJob` 은 가능합니다. `RayCluster` 대신 `RayJob` 으로 만들면 이 화면에 뜹니다.
+
+이 화면에서 확인할 것들입니다.
+
+- `Status overview` 의 `Admitted` 숫자가 우리가 큐에 넣은 워크로드 수입니다.
+- 목록의 이름은 원본 이름이 아니라 Kueue 가 만든 `Workload` 이름입니다.
+  `pytorchjob-lora-lab-style-42b79` 처럼 `<종류>-<이름>-<해시>` 입니다.
+- `Admitted` 는 **쿼터를 예약받았다**는 뜻이지 파드가 돈다는 뜻이 아닙니다.
+  `Running: 0` 인데 `Admitted: 2` 인 상태가 정상적으로 있을 수 있습니다.
+
+어긋나면: 아무것도 안 보이면 셋 중 하나입니다.
+
+```bash
+# 1. 네임스페이스가 Kueue 관리 대상인가
+oc get ns <ns> -o jsonpath='{.metadata.labels.kueue\.openshift\.io/managed}'
+
+# 2. Kueue 가 그 종류를 관리하도록 켜져 있나 (기본값은 BatchJob 하나뿐)
+oc get kueues.kueue.openshift.io cluster -o jsonpath='{.spec.config.integrations.frameworks}'
+
+# 3. 워크로드에 큐 라벨이 있나 (생성 시점에만 반영됩니다)
+oc get pytorchjob <name> -n <ns> -o jsonpath='{.metadata.labels.kueue\.x-k8s\.io/queue-name}'
+```
+
+---
+
 ## 아직 못 찍은 화면
 
-- **RHOAI 대시보드**: `rhods-dashboard-...apps` 는 브라우저에서 인증서 경고가 먼저 뜹니다.
-  `*.apps` 인증서는 클러스터 ingress CA 가 서명한 것이라 시스템 신뢰 저장소에 없습니다.
-  호스트마다 한 번씩 예외를 승인해야 합니다. `curl` 로 확인할 때 `-k` 가 필요한 것과 같은 이유입니다.
-- **파이프라인 실행 그래프**: RHOAI 대시보드 안에 있어 위와 같은 이유로 보류했습니다.
+- **파이프라인 실행 그래프**: Pipelines > Runs 안에 있습니다. iris 샘플로 볼 수 있습니다.
 - **콘솔 파드 터미널**: 처음 열면 검은 화면입니다. 콘솔 버그이고 `Expand` 를 누르면 나옵니다.
   자세한 것은 [README 트러블슈팅](../../README.md#트러블슈팅) 에 있습니다.
+
+`*.apps` 는 브라우저에서 인증서 경고가 먼저 뜹니다.
+클러스터 ingress CA 가 서명한 것이라 시스템 신뢰 저장소에 없습니다.
+호스트마다 한 번씩 예외를 승인해야 합니다. `curl` 에 `-k` 가 필요한 것과 같은 이유입니다.
