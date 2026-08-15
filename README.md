@@ -658,8 +658,27 @@ EC2 단가가 정확히 +22.9%, gp3가 +14%입니다.
 ### 삭제 후 확인 체크리스트
 
 ```bash
-./scripts/verify-clean.sh
+./scripts/verify-clean.sh        # 이 클러스터가 깨끗이 지워졌나 (infraID 기준)
+./scripts/sweep.sh               # 리전에 돈 나가는 게 남았나 (기준 없음)
 ```
+
+두 스크립트는 보는 게 다릅니다.
+
+| | 기준 | 무엇을 답하나 |
+| --- | --- | --- |
+| `verify-clean.sh` | `infraID` | 이 클러스터의 잔여물이 있나 |
+| `sweep.sh` | 없음 | 이 리전에 과금 리소스가 뭐가 있나 |
+
+**반복 실습에서는 `sweep.sh` 가 실질적인 안전장치입니다.**
+설치가 중간에 깨져 `metadata.json` 이 안 생긴 세대나, `clusters/` 를 지워 `infraID` 를 잃은 세대는 `verify-clean.sh` 로 안 잡힙니다.
+`sweep.sh` 는 EC2, NAT, 로드밸런서, EBS(붙은 것과 고아 둘 다), Elastic IP, 프라이빗 존, S3 를 전부 나열하고 **시간당 합계**를 냅니다.
+
+```text
+현재 시간당 약 $1.5423  (하루 $37.02 · 한 달 $1126)
+```
+
+`과금 리소스 없음` 이 나와야 세션이 끝난 것입니다.
+`--all` 을 주면 모든 리전을 훑습니다. 리전을 바꿔가며 실습했다면 한 번 돌려 보세요.
 
 수동으로 확인한다면:
 
@@ -947,7 +966,8 @@ ocp-aws-lab/
 │   ├── render-config.sh        # profiles/*.tpl → install-config.yaml
 │   ├── create-cluster.sh       # 설치 + metadata.json 자동 백업
 │   ├── destroy-cluster.sh
-│   ├── verify-clean.sh         # 잔여 리소스 스캔
+│   ├── verify-clean.sh         # infraID 기준 잔여 리소스 스캔
+│   ├── sweep.sh                # 기준 없이 리전 전체 과금 리소스 스캔
 │   ├── setup-budget.sh         # AWS Budgets 알림
 │   ├── render-manifests.sh     # manifests/*.tpl → clusters/<name>/manifests/
 │   ├── deploy-agent-stack.sh   # agent 스택 배포 + 기동 대기

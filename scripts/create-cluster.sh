@@ -39,6 +39,15 @@ backup_metadata() {
     printf "\n"
     ok "metadata.json 백업: $BACKUP_DIR/metadata.json"
     info "infraID: $(cluster_infra_id)"
+
+    # 열려 있는 실행 기록이 있으면 infraID 를 자동으로 적습니다.
+    # 손으로 하게 두면 빼먹습니다. 실제로 빼먹은 적이 있습니다.
+    # metadata.json 과 기록, 두 곳에 남아야 하나를 잃어도 회수할 수 있습니다.
+    if [[ -f "$REPO_ROOT/docs/runlog/.current" ]]; then
+      "$REPO_ROOT/scripts/runlog.sh" res infra "$(cluster_infra_id)" \
+        "destroy 의 기준. 이게 없으면 태그로 역추적해야 합니다" >/dev/null 2>&1 \
+        && ok "실행 기록에 infraID 기록됨"
+    fi
   fi
 }
 trap backup_metadata EXIT

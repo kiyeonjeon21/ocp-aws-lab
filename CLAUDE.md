@@ -96,18 +96,52 @@ source scripts/env.sh
 | 오퍼레이터 CR 을 문서에서 베껴 레포에 박기 | 버전마다 필드가 바뀝니다. `alm-examples` 에서 꺼내 쓰세요 (아래 5절) |
 | 검증 없이 "됐다"고 보고 | 기준은 `verify-agent-stack.sh` 와 `verify-clean.sh` 통과입니다 |
 
-### 삭제는 두 단계입니다
+### 삭제는 세 단계입니다
 
 `destroy-cluster.sh` 하나로 끝났다고 보지 마세요.
 
 ```bash
 ./scripts/destroy-cluster.sh
-./scripts/verify-clean.sh        # 여기까지 통과해야 과금이 멈춘 것입니다
+./scripts/verify-clean.sh        # 이 클러스터가 깨끗이 지워졌나 (infraID 기준)
+./scripts/sweep.sh               # 리전에 돈 나가는 게 남았나 (기준 없음)
 ```
 
 `destroy` 가 놓치는 건 대부분 **클러스터가 동적으로 만든 것**입니다.
 Ingress Operator 가 만든 Classic ELB, PVC 가 만든 EBS 볼륨, 프라이빗 호스팅 존(개당 월 $0.50).
 agent 스택과 RHOAI 는 PVC 를 여러 개 만들기 때문에 이 랩에서 특히 잘 남습니다.
+
+**세 번째가 반복 실습의 안전장치입니다.**
+`verify-clean.sh` 는 `infraID` 가 있어야 제대로 돕니다.
+설치가 중간에 깨져 `metadata.json` 이 안 생긴 세대, `clusters/` 를 지워 `infraID` 를 잃은 세대는 그걸로 안 잡힙니다.
+`sweep.sh` 는 아무 기준 없이 리전의 과금 리소스를 전부 나열하고 시간당 합계를 냅니다.
+
+**`sweep.sh` 가 "과금 리소스 없음" 이라고 해야 세션이 끝난 것입니다.**
+
+### 반복 실습 루프
+
+이 랩은 만들었다 지웠다를 여러 번 합니다. 매 세션 이 순서를 지키세요.
+
+```bash
+source scripts/env.sh
+./scripts/sweep.sh                       # 시작 전에도 한 번. 지난 세션 잔여물 확인
+./scripts/runlog.sh new 01-install "N회차"
+
+# ... 실습 ...
+
+./scripts/gpu-node.sh down               # GPU 를 썼다면 제일 먼저
+./scripts/destroy-cluster.sh
+./scripts/verify-clean.sh
+./scripts/sweep.sh                       # 깨끗해야 함
+./scripts/runlog.sh done ok
+git add docs/runlog && git commit -m "runlog: N회차"
+```
+
+**시작 전 `sweep.sh` 를 빼먹지 마세요.**
+지난 세션의 잔여물을 이번 세션 것으로 착각하면, 세션이 끝나고 "원래 있던 건가" 하며 넘어가게 됩니다.
+시작 시점의 기준선을 알아야 끝에서 비교가 됩니다.
+
+`metadata.json` 백업은 `clusters/_backups/` 에 세대별로 쌓입니다. 지우지 마세요.
+`create-cluster.sh` 가 종료 시 백업하면서 열려 있는 실행 기록에 `infraID` 도 자동으로 적습니다.
 
 ---
 
