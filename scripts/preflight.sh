@@ -114,6 +114,7 @@ case "$PROFILE" in
   compact) ITYPES="m6i.2xlarge" ;;
   sno)     ITYPES="m6i.2xlarge" ;;
   default) ITYPES="m6i.xlarge" ;;
+  ai)      ITYPES="m6i.xlarge m6i.2xlarge" ;;
 esac
 for t in $ITYPES; do
   if [[ "$PROFILE" == "default" ]]; then
@@ -129,6 +130,46 @@ for t in $ITYPES; do
     fail "$t 가 $AZ 에서 제공되지 않습니다. .env 의 AZ 를 바꾸세요"
   fi
 done
+
+# ---------------------------------------------------------------- 6b. GPU (ai 프로파일)
+# GPU 노드는 설치 후에 붙이지만, 쿼터와 AZ 재고는 지금 확인해야 합니다.
+# 실습 당일에 "이 AZ 에는 g6 가 없다"를 알게 되면 클러스터를 다시 깔아야 합니다.
+# 단일 AZ 로 설치하기 때문에 나중에 AZ 만 바꿀 수가 없습니다.
+if [[ "$PROFILE" == "ai" ]]; then
+  head1 "GPU 노드 (설치 후 붙임)"
+
+  if aws ec2 describe-instance-type-offerings --region "$REGION" \
+       --location-type availability-zone \
+       --filters "Name=instance-type,Values=$GPU_INSTANCE_TYPE" "Name=location,Values=$AZ" \
+       --query 'InstanceTypeOfferings[0].InstanceType' --output text 2>/dev/null \
+     | grep -q "$GPU_INSTANCE_TYPE"; then
+    ok "$GPU_INSTANCE_TYPE 가 $AZ 에서 제공됨"
+  else
+    fail "$GPU_INSTANCE_TYPE 가 $AZ 에 없습니다"
+    OK_AZ=$(aws ec2 describe-instance-type-offerings --region "$REGION" \
+              --location-type availability-zone \
+              --filters "Name=instance-type,Values=$GPU_INSTANCE_TYPE" \
+              --query 'InstanceTypeOfferings[].Location' --output text 2>/dev/null | tr '\t' ' ')
+    info "가능한 AZ: ${OK_AZ:-없음}"
+    info ".env 의 AZ 를 바꾸세요. 설치 후에는 못 바꿉니다"
+  fi
+
+  # G/VT 는 일반 인스턴스와 완전히 별개 쿼터입니다.
+  # 신규 계정은 0 인 경우가 있고 상향 승인에 하루 이상 걸립니다.
+  GQ=$(aws service-quotas get-service-quota --service-code ec2 \
+         --quota-code L-DB2E81BA --region "$REGION" --query 'Quota.Value' --output text 2>/dev/null)
+  GV=$(aws ec2 describe-instance-types --region "$REGION" --instance-types "$GPU_INSTANCE_TYPE" \
+         --query 'InstanceTypes[0].VCpuInfo.DefaultVCpus' --output text 2>/dev/null)
+  if [[ "$GQ" =~ ^[0-9.]+$ && "$GV" =~ ^[0-9]+$ ]]; then
+    if (( ${GQ%.*} >= GV )); then
+      ok "G/VT vCPU 쿼터 ${GQ%.*} (>= $GPU_INSTANCE_TYPE 의 $GV)"
+    else
+      fail "G/VT vCPU 쿼터 ${GQ%.*} < 필요 $GV. L-DB2E81BA 상향 신청이 필요합니다"
+    fi
+  else
+    warn "G/VT 쿼터를 조회하지 못했습니다"
+  fi
+fi
 
 # ---------------------------------------------------------------- 7. Route 53 위임
 head1 "DNS"
