@@ -107,8 +107,23 @@ load_ai_env() {
   # 폐쇄망에서는 이 한 줄이 불가능해서 modelcar 이미지를 따로 만듭니다.
   : "${MODEL_NAME:=qwen2.5-1.5b}"
   : "${MODEL_URL:=https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf}"
-  # RHOAI vLLM 은 GGUF 가 아니라 safetensors 를 씁니다. 같은 모델의 원본입니다.
-  : "${MODEL_HF_REPO:=Qwen/Qwen2.5-1.5B-Instruct}"
+
+  # ------------------------------------------------------------
+  # GPU 쪽은 다른 모델입니다. 일부러 그렇게 둡니다.
+  # ------------------------------------------------------------
+  # CPU 의 1.5B 로는 채팅은 되지만 코딩 에이전트가 안 됩니다.
+  # 에이전트는 툴 호출을 반복하는 루프인데, 1.5B 는 호출 형식을 안정적으로
+  # 지키지 못해서 몇 턴 못 가 깨집니다. "채팅은 되는데 에이전트는 안 되는" 경계가 여기입니다.
+  #
+  # Coder-7B 는 fp16 으로 약 15GB 라 L4 24GB 에 그대로 들어갑니다.
+  # GPU 를 g6.xlarge 에서 더 키우지 않아도 됩니다.
+  : "${VLLM_MODEL_NAME:=qwen2.5-coder-7b}"
+  : "${MODEL_HF_REPO:=Qwen/Qwen2.5-Coder-7B-Instruct}"
+  # 7B fp16 이 24GB 의 대부분을 씁니다. 1.5B 때의 0.55 로는 KV 캐시가 안 잡힙니다.
+  : "${VLLM_GPU_UTIL:=0.90}"
+  # 코딩 에이전트는 파일 내용을 통째로 넣어서 컨텍스트가 금방 커집니다.
+  # 32k 까지 지원하지만 24GB 에서는 KV 캐시가 빠듯해 16k 로 둡니다.
+  : "${VLLM_MAX_LEN:=16384}"
 
   # GPU 노드. 설치 후 gpu-node.sh 로 붙였다 뗍니다.
   : "${GPU_INSTANCE_TYPE:=g6.xlarge}"
@@ -118,6 +133,7 @@ load_ai_env() {
   export IMAGE_LLAMA IMAGE_LITELLM IMAGE_QDRANT IMAGE_OPENWEBUI IMAGE_PHOENIX
   export IMAGE_UBI IMAGE_PYTHON
   export MODEL_NAME MODEL_URL MODEL_HF_REPO
+  export VLLM_MODEL_NAME VLLM_GPU_UTIL VLLM_MAX_LEN
   export GPU_INSTANCE_TYPE GPU_VOLUME_SIZE
 }
 

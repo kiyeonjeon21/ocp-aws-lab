@@ -64,13 +64,16 @@ fi
 # 추론 백엔드. 기본은 agent 스택의 llama.cpp 입니다.
 # RHOAI 의 vLLM 으로 바꾸는 건 switch-backend.sh 가 합니다.
 : "${LLM_API_BASE:=http://llama-cpp:8080/v1}"
+# vLLM 엔드포인트. RawDeployment 모드에서는 Service 이름이 <isvc>-predictor 입니다.
+# 네임스페이스가 달라서 FQDN 으로 써야 합니다.
+: "${VLLM_API_BASE:=http://${VLLM_MODEL_NAME}-predictor.${RHOAI_NAMESPACE}.svc.cluster.local:8080/v1}"
 
 # InferenceService 용. deploy-model.sh 가 클러스터에서 실제 값을 채웁니다.
 : "${SERVING_RUNTIME:=}"
 MODEL_DIR="${MODEL_HF_REPO##*/}"
 
 export OFFLINE_MODE HF_OFFLINE VERSION_CHECK LITELLM_COST_MAP RAG_EMBEDDING_ENGINE
-export LLM_API_BASE SERVING_RUNTIME MODEL_DIR
+export LLM_API_BASE VLLM_API_BASE SERVING_RUNTIME MODEL_DIR
 
 # ------------------------------------------------------------------
 # 렌더링
@@ -81,6 +84,7 @@ VARS='$AGENT_NAMESPACE $RHOAI_NAMESPACE $STORAGE_CLASS $CLUSTER_NAME $BASE_DOMAI
 VARS+=' $IMAGE_LLAMA $IMAGE_LITELLM $IMAGE_QDRANT $IMAGE_OPENWEBUI $IMAGE_PHOENIX'
 VARS+=' $IMAGE_UBI $IMAGE_PYTHON'
 VARS+=' $MODEL_NAME $MODEL_URL $MODEL_HF_REPO $MODEL_DIR'
+VARS+=' $VLLM_MODEL_NAME $VLLM_GPU_UTIL $VLLM_MAX_LEN $VLLM_API_BASE'
 VARS+=' $OFFLINE_MODE $HF_OFFLINE $VERSION_CHECK $LITELLM_COST_MAP $RAG_EMBEDDING_ENGINE'
 VARS+=' $LLM_API_BASE $SERVING_RUNTIME'
 

@@ -44,7 +44,11 @@ spec:
   storageClassName: ${STORAGE_CLASS}
   resources:
     requests:
-      storage: 20Gi
+      # Coder-7B safetensors 가 15.24GB 입니다. 20Gi(=21.5GB)면 여유가 6GB뿐이고,
+      # huggingface_hub 버전에 따라 캐시와 최종본을 잠깐 동시에 들고 있습니다.
+      # 15GB 를 다 받고 마지막에 공간이 모자라 실패하는 게 제일 아깝습니다.
+      # 20GB 추가는 시간당 $0.002 입니다.
+      storage: 40Gi
 ---
 apiVersion: batch/v1
 kind: Job

@@ -140,6 +140,13 @@ git add docs/runlog && git commit -m "runlog: N회차"
 지난 세션의 잔여물을 이번 세션 것으로 착각하면, 세션이 끝나고 "원래 있던 건가" 하며 넘어가게 됩니다.
 시작 시점의 기준선을 알아야 끝에서 비교가 됩니다.
 
+세션 중에 `./scripts/snapshot.sh` 를 한 번 돌려 두세요.
+`docs/snapshots/<날짜>-<infraID>.md` 에 그 세대의 ID·엔드포인트·버전이 남습니다.
+infraID 가 파일 이름에 들어가므로 세대끼리 덮어쓰지 않고, 두 세대를 diff 하면 무엇이 달라졌는지 보입니다.
+
+**세대마다 바뀌는 값을 README 에 적지 마세요.** 다음 세대에 전부 거짓말이 됩니다.
+구조와 포트는 README, ID 와 엔드포인트는 스냅샷입니다.
+
 `metadata.json` 백업은 `clusters/_backups/` 에 세대별로 쌓입니다. 지우지 마세요.
 `create-cluster.sh` 가 종료 시 백업하면서 열려 있는 실행 기록에 `infraID` 도 자동으로 적습니다.
 

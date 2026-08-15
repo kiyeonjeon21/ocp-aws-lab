@@ -22,8 +22,17 @@ metadata:
 data:
   config.yaml: |
     model_list:
-      # model_name 은 클라이언트가 부르는 이름입니다.
-      # llama.cpp 의 --alias 와 맞춰 두면 로그 읽을 때 헷갈리지 않습니다.
+      # ------------------------------------------------------------
+      # 두 모델을 동시에 노출합니다.
+      # ------------------------------------------------------------
+      # 이 게이트웨이 하나에 CPU 쪽과 GPU 쪽을 둘 다 걸어 두면,
+      # 클라이언트는 model 이름만 바꿔서 백엔드를 고를 수 있습니다.
+      # Open WebUI 는 드롭다운에서, 코딩 에이전트는 설정 파일에서 고릅니다.
+      #
+      # GPU 가 안 떠 있으면 두 번째는 호출할 때 에러가 납니다.
+      # LiteLLM 은 기동 시 백엔드에 연결하지 않으므로 그래도 뜹니다.
+
+      # 채팅용. GPU 없이 항상 돕니다.
       - model_name: ${MODEL_NAME}
         litellm_params:
           # openai/ 접두사는 "OpenAI 호환 API 규격으로 말하라"는 뜻입니다.
@@ -33,6 +42,16 @@ data:
           # llama.cpp 는 키를 검사하지 않지만 클라이언트가 빈 값을 거부합니다.
           api_key: not-needed
           # CPU 추론이라 느립니다. 기본 타임아웃이면 긴 응답에서 잘립니다.
+          timeout: 600
+          stream_timeout: 600
+
+      # 코딩 에이전트용. GPU 노드와 InferenceService 가 있어야 응답합니다.
+      # 1.5B 로는 툴 호출 루프가 안 돌아서 별도 모델이 필요합니다.
+      - model_name: ${VLLM_MODEL_NAME}
+        litellm_params:
+          model: openai/${VLLM_MODEL_NAME}
+          api_base: ${VLLM_API_BASE}
+          api_key: not-needed
           timeout: 600
           stream_timeout: 600
 
@@ -156,3 +175,37 @@ spec:
     - name: http
       port: 4000
       targetPort: http
+---
+# 클러스터 밖에서 코딩 에이전트를 붙이기 위한 Route 입니다.
+#
+# ------------------------------------------------------------------
+# 왜 이거 하나로 코딩 에이전트가 붙나
+# ------------------------------------------------------------------
+# LiteLLM 이 OpenAI 호환 엔드포인트라, base_url 과 키만 받는 도구는
+# 전부 그대로 꽂힙니다. 아키텍처가 바뀌지 않습니다.
+#
+#   export OPENAI_API_BASE=https://litellm.apps.<cluster>.<domain>/v1
+#   export OPENAI_API_KEY=sk-agent-lab
+#   aider --model openai/qwen2.5-coder-7b
+#
+# Continue.dev, Cline, OpenCode 도 같은 두 값만 받습니다.
+# Windsurf 나 Cursor 는 인덱싱과 일부 추론을 자기네 클라우드에서 하므로
+# base_url 을 바꿔도 반쪽만 동작합니다. 폐쇄망에서 첫 번째로 걸리는 함정입니다.
+#
+# 주의: 이 Route 는 퍼블릭 DNS 로 열립니다.
+# LITELLM_MASTER_KEY 하나가 유일한 방어선이라 랩에서만 이렇게 두세요.
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: litellm
+  namespace: ${AGENT_NAMESPACE}
+spec:
+  host: litellm.apps.${CLUSTER_NAME}.${BASE_DOMAIN}
+  to:
+    kind: Service
+    name: litellm
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect

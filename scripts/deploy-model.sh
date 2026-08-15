@@ -43,11 +43,41 @@ ok "GPU allocatable  $GPUS"
 #   - ClusterServingRuntime 으로 바로 있는 경우
 #   - Template 안에 들어 있어서 프로젝트에 인스턴스를 만들어야 하는 경우
 # 이름을 문서에서 베껴 오면 다음 버전에서 깨지므로 클러스터에서 찾습니다.
+#
+# ------------------------------------------------------------------
+# 다만 "vLLM 을 지원하는 첫 번째" 를 집으면 안 됩니다
+# ------------------------------------------------------------------
+# RHOAI 3.4 는 vLLM 런타임을 9개 냅니다. 가속기별로 하나씩입니다.
+#   vllm-cuda-runtime      NVIDIA        <- 우리가 원하는 것
+#   vllm-rocm-runtime      AMD
+#   vllm-gaudi-runtime     Intel Gaudi
+#   vllm-spyre-*           IBM Spyre
+#   vllm-cpu-runtime       가속기 없음
+# 전부 supportedModelFormats 에 vLLM 을 갖고 있어서 조건만으로는 구분이 안 됩니다.
+#
+# 알파벳순으로 집으면 vllm-cpu-runtime 이 걸립니다.
+# 그러면 GPU 노드를 띄워 놓고 그 위에서 CPU 추론을 하게 됩니다.
+# 파드는 정상으로 뜨고 응답도 하기 때문에 한참 모릅니다. GPU 요금만 나갑니다.
+# 그래서 가속기 우선순위를 명시적으로 둡니다.
 head1 "1. ServingRuntime"
 
-SERVING_RUNTIME=$(oc get clusterservingruntime -o json 2>/dev/null \
-  | jq -r '.items[] | select([.spec.supportedModelFormats[]?.name] | index("vLLM")) | .metadata.name' \
-  | head -1)
+# NVIDIA 를 먼저, 없으면 다른 가속기, CPU 는 마지막.
+RUNTIME_PREF="cuda rocm gaudi spyre-x86 multinode cpu-x86 cpu"
+
+pick_runtime() {   # $1: jq 로 뽑은 이름 목록
+  local names="$1" p
+  for p in $RUNTIME_PREF; do
+    local hit
+    hit=$(grep -m1 -- "-${p}-runtime\$" <<<"$names" || true)
+    [[ -n "$hit" ]] && { printf '%s' "$hit"; return; }
+  done
+  head -1 <<<"$names"
+}
+
+CSR_NAMES=$(oc get clusterservingruntime -o json 2>/dev/null \
+  | jq -r '.items[] | select([.spec.supportedModelFormats[]?.name] | index("vLLM")) | .metadata.name')
+SERVING_RUNTIME=""
+[[ -n "$CSR_NAMES" ]] && SERVING_RUNTIME=$(pick_runtime "$CSR_NAMES")
 
 if [[ -n "$SERVING_RUNTIME" ]]; then
   ok "ClusterServingRuntime  $SERVING_RUNTIME"
@@ -62,15 +92,23 @@ if [[ -z "$SERVING_RUNTIME" ]]; then
   info "ClusterServingRuntime 이 없습니다. RHOAI Template 에서 만듭니다"
   oc get ns "$RHOAI_NAMESPACE" >/dev/null 2>&1 || oc create ns "$RHOAI_NAMESPACE" >/dev/null
 
-  RT=$(oc get template -n redhat-ods-applications -o json 2>/dev/null \
-    | jq -c '[.items[].objects[]?
-              | select(.kind == "ServingRuntime")
-              | select([.spec.supportedModelFormats[]?.name] | index("vLLM"))][0] // empty')
+  TPL_NAMES=$(oc get template -n redhat-ods-applications -o json 2>/dev/null \
+    | jq -r '.items[].objects[]?
+             | select(.kind == "ServingRuntime")
+             | select([.spec.supportedModelFormats[]?.name] | index("vLLM"))
+             | .metadata.name')
 
-  if [[ -n "$RT" ]]; then
-    SERVING_RUNTIME=$(jq -r '.metadata.name' <<<"$RT")
+  if [[ -n "$TPL_NAMES" ]]; then
+    WANT=$(pick_runtime "$TPL_NAMES")
+    info "후보 $(wc -l <<<"$TPL_NAMES" | tr -d ' ')개 중 선택: $WANT"
+    RT=$(oc get template -n redhat-ods-applications -o json 2>/dev/null \
+      | jq -c --arg n "$WANT" '[.items[].objects[]?
+                | select(.kind == "ServingRuntime")
+                | select(.metadata.name == $n)][0] // empty')
+    SERVING_RUNTIME="$WANT"
     jq -c --arg ns "$RHOAI_NAMESPACE" '.metadata.namespace = $ns' <<<"$RT" | oc apply -f - >/dev/null
     ok "ServingRuntime $SERVING_RUNTIME 생성 (Template 기준)"
+    info "  이미지: $(jq -r '.spec.containers[0].image' <<<"$RT" | cut -c1-70)"
   else
     warn "vLLM ServingRuntime 을 찾지 못했습니다"
     warn "InferenceService 의 runtime 을 비워 두고 KServe 자동 선택에 맡깁니다"

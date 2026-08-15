@@ -25,7 +25,7 @@
 apiVersion: serving.kserve.io/v1beta1
 kind: InferenceService
 metadata:
-  name: ${MODEL_NAME}
+  name: ${VLLM_MODEL_NAME}
   namespace: ${RHOAI_NAMESPACE}
   labels:
     opendatahub.io/dashboard: "true"
@@ -36,7 +36,7 @@ metadata:
     # ServiceAccount 토큰을 LiteLLM secret 에 넣어야 합니다.
     security.opendatahub.io/enable-auth: "false"
     # 대시보드에 이름이 보이게 합니다.
-    openshift.io/display-name: ${MODEL_NAME}
+    openshift.io/display-name: ${VLLM_MODEL_NAME}
 spec:
   predictor:
     # GPU 노드에만 뜨게 합니다.
@@ -63,19 +63,19 @@ spec:
       resources:
         requests:
           cpu: "2"
-          memory: 8Gi
+          memory: 16Gi
           nvidia.com/gpu: "1"
         limits:
           cpu: "3"
-          memory: 12Gi
+          memory: 24Gi
           # GPU 는 requests 와 limits 가 같아야 합니다.
           # 다르게 쓰면 kubelet 이 거부합니다. 확장 리소스의 규칙입니다.
           nvidia.com/gpu: "1"
       args:
         # vLLM 이 이 이름으로 모델을 노출합니다.
         # LiteLLM 의 model_list 이름과 맞춰야 합니다.
-        - --served-model-name=${MODEL_NAME}
-        # L4 24GB 에 1.5B 를 올리면 KV 캐시가 남아돕니다.
-        # 기본값 0.9 로 두면 vLLM 이 22GB 를 선점해서 다른 걸 못 올립니다.
-        - --gpu-memory-utilization=0.55
-        - --max-model-len=8192
+        - --served-model-name=${VLLM_MODEL_NAME}
+        # 7B fp16 이 약 15GB 입니다. 나머지를 KV 캐시로 씁니다.
+        # 이 값을 낮추면 컨텍스트 길이가 먼저 줄어듭니다.
+        - --gpu-memory-utilization=${VLLM_GPU_UTIL}
+        - --max-model-len=${VLLM_MAX_LEN}

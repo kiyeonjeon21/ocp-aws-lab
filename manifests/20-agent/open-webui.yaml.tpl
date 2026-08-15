@@ -101,6 +101,30 @@ spec:
             # ------------------------------------------------------
             # 모델 백엔드
             # ------------------------------------------------------
+            # ------------------------------------------------------
+            # 보조 LLM 호출 끄기. CPU 추론에서는 필수입니다.
+            # ------------------------------------------------------
+            # Open WebUI 는 사용자가 메시지 하나를 보내면 LLM 을 여러 번 부릅니다.
+            # 본 응답 외에 제목 생성, 태그 생성, 후속질문 제안, 자동완성이
+            # 각각 별도 요청으로 동시에 나갑니다.
+            #
+            # GPU 라면 눈에 안 띄지만, CPU 에서 1.5B 를 돌리면 이것들이
+            # 본 응답과 CPU 를 나눠 쓰면서 체감 속도를 몇 배로 떨어뜨립니다.
+            # 프롬프트도 큽니다. 태그 생성 프롬프트 하나가 5,000 토큰을 넘습니다.
+            #
+            # llama.cpp 쪽 --parallel 1 과 짝입니다.
+            # 그쪽은 "동시에 처리하지 않는다", 이쪽은 "애초에 안 보낸다" 입니다.
+            - name: ENABLE_TITLE_GENERATION
+              value: "false"
+            - name: ENABLE_TAGS_GENERATION
+              value: "false"
+            - name: ENABLE_FOLLOW_UP_GENERATION
+              value: "false"
+            - name: ENABLE_AUTOCOMPLETE_GENERATION
+              value: "false"
+            - name: ENABLE_RETRIEVAL_QUERY_GENERATION
+              value: "false"
+
             - name: ENABLE_OLLAMA_API
               value: "false"
             - name: ENABLE_OPENAI_API

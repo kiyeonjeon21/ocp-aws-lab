@@ -219,7 +219,7 @@ done
 > 다이어그램은 `lab1-k6s9t` 스냅샷입니다.
 > destroy 후 재설치하면 구조는 같지만 리소스 ID는 전부 바뀝니다.
 > **링크는 Excalidraw 워크스페이스 권한이 필요합니다.**
-> 권한이 없으면 위의 mermaid 세 장으로 보세요. 그쪽이 항상 최신입니다.
+> 권한이 없으면 위의 mermaid 로 보세요. 그쪽이 항상 최신입니다.
 
 클러스터 안쪽 구성은 [agent 스택과 OpenShift AI](#agent-스택과-openshift-ai)에 따로 있습니다.
 
@@ -443,39 +443,136 @@ RHOAI는 오퍼레이터가 다 해 주기 때문에 배우는 게 적습니다.
 
 ### 구성
 
+전체를 한 장에 넣으면 읽을 수 없어서 두 장으로 나눴습니다.
+첫 장은 **요청이 어디로 흐르는가**, 둘째 장은 **누가 무엇을 만들고 어디서 도는가** 입니다.
+
+#### 1. 호출 경로
+
 ```mermaid
+%%{init: {"flowchart": {"wrappingWidth": 400}}}%%
 flowchart TB
-    USER["브라우저"]
+    BROWSER["브라우저"]
+    AGENT_CLI["코딩 에이전트<br/>aider · Continue · Cline · OpenCode"]
 
-    subgraph AGENT["네임스페이스 agent-lab"]
-        WEBUI["Open WebUI :8080<br/>채팅 UI"]
-        LITE["LiteLLM :4000<br/>OpenAI 호환 shim"]
-        LLAMA["llama.cpp :8080<br/>Qwen2.5-1.5B Q4 · CPU"]
-        QD["Qdrant :6333<br/>벡터 DB"]
-        PHX["Phoenix :6006<br/>OTEL 트레이싱"]
+    subgraph ROUTES["Route (*.apps 와일드카드 → Classic ELB → 워커의 라우터 파드)"]
+        R_CHAT["chat.apps"]
+        R_TRACE["trace.apps"]
+        R_LLM["litellm.apps"]
     end
 
-    subgraph SERVING["네임스페이스 ai-serving (RHOAI)"]
-        ISVC["InferenceService<br/>vLLM · GPU"]
-        PVC[/"PVC model-cache<br/>safetensors"/]
+    subgraph NS_AGENT["네임스페이스 agent-lab · 손으로 올린 OSS 스택"]
+        WEBUI["Open WebUI :8080<br/>채팅 UI · PVC 5Gi"]
+        QD["Qdrant :6333<br/>벡터 DB · PVC 10Gi"]
+        PHX["Phoenix :6006<br/>OTEL 트레이싱 · PVC 5Gi"]
+        LITE["LiteLLM :4000<br/>OpenAI 호환 게이트웨이"]
+        LLAMA["llama.cpp :8080<br/>Qwen2.5-1.5B Q4 · CPU · 30 tok/s"]
     end
 
-    USER -->|"chat.apps.*"| WEBUI
-    USER -->|"trace.apps.*"| PHX
+    subgraph NS_SERVING["네임스페이스 ai-serving · RHOAI KServe 가 관리"]
+        VLLM["vLLM predictor :8080<br/>Qwen2.5-Coder-7B · GPU"]
+    end
+
+    BROWSER --> R_CHAT
+    BROWSER --> R_TRACE
+    AGENT_CLI -->|"OPENAI_API_BASE + 키"| R_LLM
+
+    R_CHAT --> WEBUI
+    R_TRACE --> PHX
+    R_LLM --> LITE
+
     WEBUI -->|"OPENAI_API_BASE_URL"| LITE
-    WEBUI --> QD
-    LITE -->|"api_base (기본)"| LLAMA
-    LITE -->|"api_base (전환 후)"| ISVC
-    PVC --> ISVC
+    WEBUI -->|"RAG 검색"| QD
+    WEBUI -.->|"OTLP 트레이스"| PHX
 
-    GPU["GPU 노드 g6.xlarge<br/>gpu-node.sh up / down"]
-    GPU --> SERVING
+    LITE -->|"model: qwen2.5-1.5b"| LLAMA
+    LITE -->|"model: qwen2.5-coder-7b"| VLLM
+
+    classDef optional stroke-dasharray: 5 5
+    class VLLM optional
 ```
 
 **LiteLLM에서 나가는 화살표 두 개가 이 랩의 요점입니다.**
-`switch-backend.sh`가 바꾸는 건 `api_base` 한 줄이고, Open WebUI는 재기동조차 하지 않습니다.
-자기가 어느 쪽과 이야기하는지 모르고, 알 필요도 없습니다.
-그 무관심이 LiteLLM을 스택에 넣은 이유 전부입니다.
+같은 게이트웨이가 `model` 이름에 따라 CPU의 1.5B와 GPU의 Coder-7B로 갈라집니다.
+Open WebUI는 드롭다운에서 고르고, 코딩 에이전트는 설정 파일에서 고릅니다.
+**둘 다 자기가 어느 하드웨어와 이야기하는지 모릅니다.**
+
+`litellm.apps` Route가 코딩 에이전트용 입구입니다.
+LiteLLM이 OpenAI 호환이라 `base_url`과 키만 받는 도구는 전부 그대로 꽂힙니다.
+
+```bash
+export OPENAI_API_BASE=https://litellm.apps.<cluster>.<domain>/v1
+export OPENAI_API_KEY=sk-agent-lab
+aider --model openai/qwen2.5-coder-7b
+```
+
+Windsurf와 Cursor는 인덱싱과 일부 추론을 자기네 클라우드에서 하므로 `base_url`을 바꿔도 반쪽만 동작합니다.
+폐쇄망에서 첫 번째로 걸리는 함정입니다.
+
+점선은 GPU가 있을 때만 존재합니다.
+
+#### 2. 플랫폼과 소유 관계
+
+```mermaid
+%%{init: {"flowchart": {"wrappingWidth": 440}}}%%
+flowchart TB
+    HUB["OperatorHub · redhat-operators 카탈로그"]
+    RHOAI_OP["RHOAI 오퍼레이터 3.4.3<br/>채널 stable-3.x · stable 은 2.25 라 OCP 4.22 미지원"]
+    DSC["DataScienceCluster (default-dsc)<br/>켬: dashboard · workbenches · pipelines · kserve(RawDeployment)<br/>끔: ray · kueue · trainer · modelmesh · spark"]
+
+    subgraph RHOAI_NS["네임스페이스 redhat-ods-applications · 워커에 배치"]
+        KSERVE["KServe 컨트롤러"]
+        DASH["대시보드"]
+        WB["Workbenches (Jupyter)"]
+        PIPE["Data Science Pipelines"]
+        REG["Model Registry"]
+    end
+
+    subgraph OURS["우리가 만드는 것 (manifests/50-rhoai)"]
+        ISVC["InferenceService qwen2.5-coder-7b<br/>RawDeployment · GPU toleration + nodeSelector"]
+        RUNTIME["ServingRuntime vllm-cuda-runtime<br/>RHOAI 가 주는 9개 중 CUDA 선택"]
+        JOB["Job download-model<br/>HuggingFace → PVC"]
+    end
+
+    PVC[("PVC model-cache 40Gi · gp3-csi<br/>Qwen2.5-Coder-7B safetensors 15GB")]
+    VLLM["KServe 가 만든 Deployment + Service<br/>vLLM predictor :8080"]
+
+    GPUSTACK["GPU 준비물<br/>Machine API → g6.xlarge · NFD 라벨 · NVIDIA 드라이버"]
+    GPUN["gpu worker · L4 24GB<br/>taint nvidia.com/gpu · 광고 nvidia.com/gpu=1"]
+
+    HUB --> RHOAI_OP
+    RHOAI_OP -->|"CSV 의 alm-examples 에서 CR 추출 후 jq 로 덧칠"| DSC
+    DSC --> KSERVE
+    DSC --> DASH
+    DSC --> WB
+    DSC --> PIPE
+    DSC --> REG
+
+    ISVC --> KSERVE
+    RUNTIME --> KSERVE
+    KSERVE -->|"Deployment/Service 생성"| VLLM
+    JOB --> PVC
+    PVC -->|"storageUri pvc://"| VLLM
+
+    GPUSTACK --> GPUN
+    VLLM -->|"여기에만 스케줄"| GPUN
+
+    classDef optional stroke-dasharray: 5 5
+    class GPUN,VLLM,ISVC,GPUSTACK optional
+```
+
+**`우리가 만드는 것`은 셋뿐입니다.**
+나머지는 오퍼레이터가 만듭니다.
+`InferenceService`를 하나 넣으면 KServe 컨트롤러가 Deployment와 Service를 대신 만듭니다.
+그래서 문제가 생겼을 때 볼 곳이 파드가 아니라 **컨트롤러 로그**입니다.
+직접 올린 agent 스택과 정확히 반대입니다.
+
+세 가지가 실제로 발목을 잡았습니다.
+
+- **채널**: `stable`은 RHOAI 2.25이고 OCP 4.22를 지원하지 않습니다. `defaultChannel`인 `stable-3.x`가 3.4.3을 줍니다. 문서 대부분이 `stable`이라고 적혀 있어서 하드코딩하면 미지원 조합이 깔립니다
+- **ServingRuntime**: RHOAI 3.4는 vLLM 런타임을 가속기별로 **9개** 냅니다. 전부 `supportedModelFormats`에 `vLLM`을 갖고 있어 조건만으로는 구분이 안 됩니다. 알파벳순으로 집으면 `vllm-cpu-runtime`이 걸려서 **GPU 위에서 CPU 추론**을 하게 됩니다
+- **컴포넌트 이름**: 3.x에서 `trainer`가 새로 생겼고 기본이 `Managed`입니다. JobSet 오퍼레이터를 요구해서 `DataScienceCluster`가 계속 `Not Ready`였습니다
+
+이래서 CR과 채널을 레포에 박지 않고 클러스터에서 꺼내 씁니다.
 
 ### 실행 순서
 
@@ -968,6 +1065,7 @@ ocp-aws-lab/
 │   ├── destroy-cluster.sh
 │   ├── verify-clean.sh         # infraID 기준 잔여 리소스 스캔
 │   ├── sweep.sh                # 기준 없이 리전 전체 과금 리소스 스캔
+│   ├── snapshot.sh             # 지금 세대의 ID·엔드포인트·버전을 마크다운으로
 │   ├── setup-budget.sh         # AWS Budgets 알림
 │   ├── render-manifests.sh     # manifests/*.tpl → clusters/<name>/manifests/
 │   ├── deploy-agent-stack.sh   # agent 스택 배포 + 기동 대기
@@ -978,8 +1076,9 @@ ocp-aws-lab/
 │   ├── switch-backend.sh       # LiteLLM api_base 전환 (llama.cpp <-> vLLM)
 │   └── runlog.sh               # 실행 기록. new / note / res / run / done
 ├── docs/
-│   └── runlog/                 # 실습 기록. 커밋합니다
-│       └── TEMPLATE.md
+│   ├── runlog/                 # 실습 기록. 커밋합니다
+│   │   └── TEMPLATE.md
+│   └── snapshots/              # 세대별 클러스터 상태. snapshot.sh 가 생성
 ├── secrets/                    # gitignored
 │   └── .gitkeep
 └── clusters/                   # gitignored. metadata.json 과 렌더링 결과물

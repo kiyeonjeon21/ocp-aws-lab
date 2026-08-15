@@ -256,7 +256,17 @@ rhoai)
   # 랩에서 안 쓰는 무거운 컴포넌트를 끕니다.
   # 워커 2대에 전부 켜면 자원이 남지 않습니다.
   # 나중에 하나씩 켜 보면서 무엇이 얼마를 먹는지 재 보는 것도 실습거리입니다.
-  for c in codeflare ray kueue trainingoperator modelmeshserving; do
+  # 이 랩은 서빙만 합니다. 학습/분산 관련은 전부 끕니다.
+  #
+  # 3.x 에서 이름이 늘었습니다. 2.x 목록만 갖고 있으면 새 컴포넌트가
+  # Managed 로 남아 DSC 가 Ready 가 되지 않습니다.
+  # 실제로 trainer 가 그랬습니다.
+  #   TrainerReady = False  JobSet operator not installed
+  # JobSet 오퍼레이터를 따로 깔아야 하는데, 분산 학습을 안 하면 필요 없습니다.
+  #
+  # 목록에 없는 이름은 jq 가 조용히 건너뛰므로 2.x 에 대고 돌려도 안전합니다.
+  for c in codeflare ray kueue trainingoperator modelmeshserving \
+           trainer sparkoperator llamastackoperator modelsasservice; do
     DSC=$(jq -c --arg c "$c" '
       if .spec.components[$c] then .spec.components[$c].managementState = "Removed" else . end
     ' <<<"$DSC")
