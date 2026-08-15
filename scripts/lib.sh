@@ -167,7 +167,7 @@ profile_hourly_cost() {
     compact) echo 1.30 ;;
     sno)     echo 0.55 ;;
     default) echo 1.35 ;;
-    ai)      echo 1.52 ;;
+    ai)      echo 1.54 ;;
     *)       echo 1.00 ;;
   esac
 }
