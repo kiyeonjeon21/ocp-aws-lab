@@ -179,7 +179,7 @@ profile_peak_vcpu() {
 # runlog.sh 가 실습 소요시간에 곱해서 추정치를 냅니다.
 profile_hourly_cost() {
   case "${1:-$PROFILE}" in
-    minimal) echo 0.93 ;;
+    minimal) echo 0.95 ;;
     compact) echo 1.30 ;;
     sno)     echo 0.55 ;;
     default) echo 1.35 ;;

@@ -121,9 +121,9 @@ agent 스택과 RHOAI 는 PVC 를 여러 개 만들기 때문에 이 랩에서 �
    create-cluster.sh     설치 ~40분. 여기서부터 과금
 2. render-manifests.sh   manifests/*.tpl -> clusters/<name>/manifests/
    deploy-agent-stack.sh llama.cpp · LiteLLM · Qdrant · Open WebUI · Phoenix
-3. gpu-node.sh up        GPU MachineSet. 여기서부터 +$0.83/h
+3. install-rhoai.sh rhoai  Operator + DataScienceCluster. GPU 없이 됩니다
+4. gpu-node.sh up        GPU MachineSet. 여기서부터 +$0.83/h
    install-rhoai.sh gpu  NFD + NVIDIA GPU Operator. 드라이버 빌드 10~20분
-4. install-rhoai.sh rhoai  Operator + DataScienceCluster
 5. deploy-model.sh       가중치 PVC + InferenceService
    switch-backend.sh vllm  LiteLLM api_base 한 줄 교체
 6. verify-agent-stack.sh 검증
@@ -137,8 +137,10 @@ agent 스택과 RHOAI 는 PVC 를 여러 개 만들기 때문에 이 랩에서 �
 GPU 를 쓸 계획이면 그 AZ 에 g6 가 있는지 `preflight.sh ai` 가 먼저 확인합니다.
 `ap-northeast-2b` 에는 g6 가 없습니다.
 
-**3번은 5번 직전에 하는 게 맞습니다.**
-GPU 를 설치 직후에 붙이면 실제로 쓰기 전까지 몇 시간을 그냥 태웁니다.
+**GPU(4번)는 RHOAI 설치(3번) 뒤에 옵니다. 순서를 바꾸지 마세요.**
+RHOAI 오퍼레이터 설치는 GPU 를 전혀 쓰지 않습니다.
+GPU 를 먼저 올려두면 그 30분이 시간당 $0.83 으로 계산됩니다.
+GPU 가 실제로 필요한 건 vLLM `InferenceService` 하나뿐입니다.
 
 ---
 
@@ -230,7 +232,8 @@ WORKER --> PRIVSUB    # 허용. 노드 -> subgraph 는 어디서나 됩니다
 - **중첩 `subgraph` 를 피하세요.** VPC 안에 서브넷을 넣는 식으로 두 겹을 쓰면 dagre 가 거대한 빈 박스를 만들고 엣지가 화면을 가로지릅니다. CIDR 을 제목에 넣어 평탄화하세요.
 - 역방향 엣지를 만들지 마세요. 아웃바운드처럼 아래로 흐르는 것은 아래쪽 `subgraph` 로 빼면 위에서 아래로 정리됩니다.
 - `flowchart LR` 은 단계가 5개를 넘으면 README 폭에서 글씨를 못 읽습니다. 세로가 길어도 `TB` 가 낫습니다.
-- 최종 기준은 GitHub 입니다. push 후 한 번 보세요.
+- 라벨이 좁게 잘리면 `%%{init: {"flowchart": {"wrappingWidth": 460}}}%%` 를 첫 줄에 넣으세요. 기본값 200px 때문에 긴 라벨이 "업로 드" 처럼 깨집니다. 파서가 이 지시자를 무시해도 좁아질 뿐 렌더는 됩니다.
+- 최종 기준은 GitHub 입니다. push 후 한 번 보세요. 특히 `%%{init}%%` 를 쓴 다이어그램은 반드시 확인하세요.
 
 렌더 확인:
 

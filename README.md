@@ -159,6 +159,50 @@ flowchart TB
 
 `setup-budget.sh`는 최초 1회만 돌리면 되므로 위 흐름에 없습니다.
 
+### 설치 라이프사이클
+
+`create-cluster.sh`가 40분 동안 무엇을 하는지입니다.
+로그가 `Waiting for...`에서 오래 멈춰 있을 때 지금 어디쯤인지 알려면 이 그림을 보세요.
+
+```mermaid
+%%{init: {"flowchart": {"wrappingWidth": 460}}}%%
+flowchart TB
+    START["openshift-install create cluster"]
+    CAPI["로컬 CAPI 컨트롤 플레인 기동 · 4.16부터 Terraform 을 대체"]
+    INFRA["VPC · 서브넷 · IGW · NAT · NLB 2개 생성 &nbsp;~15분"]
+    BOOT["부트스트랩 노드 부팅 · 임시 etcd + apiserver + MCS :22623<br/>S3 의 bootstrap.ign 을 읽어서 올라옵니다"]
+    MASTERS["master × 3 : api-int :22623 에서 ignition 수신 → 이미지 pull → etcd 쿼럼<br/>여기가 제일 오래 걸립니다 &nbsp;~15분"]
+    BCOMPLETE["bootstrap-complete · 부트스트랩 노드와 S3 버킷 파괴"]
+    WORKERS["worker × 2 부팅 → ClusterOperator 34개 Available"]
+    DONE["Ingress Operator 가 Classic ELB 생성 → Install complete"]
+    DESTROY["destroy-cluster.sh · metadata.json 의 infraID 로 역추적<br/>verify-clean.sh 까지 통과해야 과금이 멈춥니다"]
+
+    START --> CAPI --> INFRA --> BOOT --> MASTERS --> BCOMPLETE --> WORKERS --> DONE --> DESTROY
+
+    classDef transient stroke-dasharray: 5 5
+    class BOOT transient
+    classDef teardown stroke:#c0392b,stroke-width:2px
+    class DESTROY teardown
+```
+
+**부트스트랩은 일회용 컨트롤 플레인입니다.**
+자기 안에 임시 etcd와 apiserver를 띄우고, 동시에 `:22623`(Machine Config Server)으로 마스터들에게 나눠줄 ignition을 서빙합니다.
+마스터 3대가 스스로 설 수 있게 되면 파괴됩니다.
+그림에서 점선인 둘이 설치 중에만 존재하는 것입니다.
+
+진행 상황은 로드밸런서 타깃 헬스로 확인하는 게 로그보다 정확합니다.
+
+```bash
+source scripts/env.sh
+for tg in $(aws elbv2 describe-target-groups --query 'TargetGroups[].TargetGroupArn' --output text); do
+  aws elbv2 describe-target-health --target-group-arn "$tg" \
+    --query 'TargetHealthDescriptions[].[Target.Id,TargetHealth.State]' --output text
+done
+```
+
+부트스트랩만 `healthy`이고 마스터가 전부 `unhealthy.draining`이면 위 그림의 **이미지 pull 단계**입니다.
+마스터가 하나씩 `healthy`로 바뀌면 곧 `bootstrap-complete`으로 넘어갑니다.
+
 ### 상세 다이어그램 (Excalidraw)
 
 `minimal` 프로파일로 실제 설치했던 클러스터(`lab1-k6s9t`)를 그린 것입니다.
@@ -175,7 +219,7 @@ flowchart TB
 > 다이어그램은 `lab1-k6s9t` 스냅샷입니다.
 > destroy 후 재설치하면 구조는 같지만 리소스 ID는 전부 바뀝니다.
 > **링크는 Excalidraw 워크스페이스 권한이 필요합니다.**
-> 권한이 없으면 위의 mermaid 두 장으로 보세요. 그쪽이 항상 최신입니다.
+> 권한이 없으면 위의 mermaid 세 장으로 보세요. 그쪽이 항상 최신입니다.
 
 클러스터 안쪽 구성은 [agent 스택과 OpenShift AI](#agent-스택과-openshift-ai)에 따로 있습니다.
 
@@ -295,15 +339,15 @@ cp ~/Downloads/pull-secret.txt secrets/pull-secret.json
 # 4. install-config 생성 (프로파일 선택)
 ./scripts/render-config.sh minimal
 
-# 4. 설치 (약 35~45분)
+# 5. 설치 (약 35~45분)
 ./scripts/create-cluster.sh
 
-# 5. 접속
+# 6. 접속
 export KUBECONFIG=$(pwd)/clusters/$CLUSTER_NAME/auth/kubeconfig
 oc get nodes
 oc get co                        # ClusterOperator 전부 Available=True 확인
 
-# 6. ⚠️ 연습이 끝나면 반드시
+# 7. ⚠️ 연습이 끝나면 반드시
 ./scripts/destroy-cluster.sh
 ```
 
@@ -318,7 +362,7 @@ oc get co                        # ClusterOperator 전부 Available=True 확인
 
 | 프로파일 | 구성 | 시간당 (us-east-1) | 용도 |
 | --- | --- | --- | --- |
-| `minimal` | 마스터 3 × m6i.xlarge + 워커 2 × m6i.large, **단일 AZ** | ~$0.93 | 설치 절차 연습, 기본값 |
+| `minimal` | 마스터 3 × m6i.xlarge + 워커 2 × m6i.large, **단일 AZ** | ~$0.95 | 설치 절차 연습, 기본값 |
 | `compact` | 마스터 3 × m6i.2xlarge, 워커 0 (마스터 schedulable) | ~$1.30 | 워커 없이 워크로드까지 올려볼 때 |
 | `sno` | 단일 노드 1 × m6i.2xlarge | ~$0.55 | 가장 저렴, 엣지/SNO 학습 |
 | `default` | 마스터 3 + 워커 3, 3 AZ (설치 프로그램 기본값) | ~$1.35 | 프로덕션에 가까운 구성 체험 |
@@ -449,12 +493,13 @@ source scripts/env.sh
 ./scripts/deploy-agent-stack.sh
 ./scripts/verify-agent-stack.sh
 
-# 2. GPU 노드 추가. 여기서부터 시간당 $0.83이 더 나갑니다
+# 2. RHOAI 오퍼레이터. 이것도 GPU 없이 됩니다
+./scripts/install-rhoai.sh rhoai     # Operator + DataScienceCluster (~30분)
+# 대시보드 / 워크벤치 / 파이프라인은 여기까지만 해도 다 돌아갑니다
+
+# 3. GPU. 여기서부터 시간당 $0.83이 더 나갑니다
 ./scripts/gpu-node.sh up 1
 ./scripts/install-rhoai.sh gpu       # NFD + NVIDIA GPU Operator (10~20분)
-
-# 3. RHOAI
-./scripts/install-rhoai.sh rhoai     # Operator + DataScienceCluster
 ./scripts/deploy-model.sh            # 가중치 다운로드 + InferenceService
 
 # 4. 백엔드 전환. Open WebUI는 그대로 두고 llama.cpp -> vLLM
@@ -464,6 +509,12 @@ source scripts/env.sh
 # 5. GPU만 반납. 클러스터는 그대로 두고 시간당 $0.83을 멈춥니다
 ./scripts/gpu-node.sh down
 ```
+
+**2번과 3번의 순서가 중요합니다.**
+RHOAI 오퍼레이터 설치는 GPU를 전혀 쓰지 않습니다.
+GPU를 먼저 올려두고 RHOAI를 깔면 그 30분이 시간당 $0.83으로 계산됩니다.
+GPU가 실제로 필요한 건 vLLM `InferenceService` 하나뿐이므로, 그 직전에 올리고 끝나면 바로 내리세요.
+이 순서 하나로 세션당 $0.4 정도가 차이납니다.
 
 각 단계는 독립적으로 다시 돌릴 수 있습니다.
 `install-rhoai.sh`는 이미 설치된 오퍼레이터를 건드리지 않고, `gpu-node.sh up`은 이미 있는 MachineSet을 확장만 합니다.
@@ -523,12 +574,13 @@ HuggingFace도 GitHub도 응답하니까요.
 | --- | --- | --- |
 | 컨트롤 플레인 m6i.xlarge | 3 | $0.576 |
 | 워커 m6i.large | 2 | $0.192 |
-| 부트스트랩 (설치 중 ~40분만) | 1 | 일회성 ~$0.15 |
-| EBS gp3 120GB × 5 | 600GB | ~$0.07 |
-| NAT Gateway (단일 AZ) | 1 | $0.045 + 데이터 $0.045/GB |
-| NLB (external + internal) | 2 | ~$0.05 |
-| Route 53 호스팅 존 | 1 | $0.50 / 월 |
-| **합계** | | **≈ $0.93 / 시간** |
+| EBS gp3 120GB × 5 | 600GB | $0.066 |
+| NAT Gateway (단일 AZ) | 1 | $0.045 |
+| NLB (external + internal) | 2 | $0.045 |
+| Classic ELB (`*.apps`) | 1 | $0.025 |
+| **합계** | | **≈ $0.95 / 시간** |
+
+부트스트랩 노드와 데이터 전송은 시간당이 아니라 별도입니다. 아래 표를 보세요.
 
 ### `ai` 프로파일 (us-east-1)
 
@@ -568,8 +620,8 @@ EC2와 EBS가 사라지므로 그 순간부터 $0.83이 멈추고, 클러스터�
 
 | 시나리오 | 비용 |
 | --- | --- |
-| `minimal` 설치 1회 + 4시간 실습 + 삭제 | **약 $5** |
-| `ai` 설치 1회 + 5시간 (GPU는 그중 2시간) + 삭제 | **약 $10** |
+| `minimal` 설치 1회 + 4시간 실습 + 삭제 | **약 $6** |
+| `ai` 설치 1회 + 5시간 (GPU는 그중 2시간) + 삭제 | **약 $12** |
 | `minimal` 하루 8시간 × 5일 (매일 삭제) | **약 $40** |
 | `ai` + GPU를 삭제 잊고 한 달 방치 | **약 $1,700** 😱 |
 
@@ -657,7 +709,7 @@ S3 버킷은 두 종류가 만들어집니다.
 5. **AWS Budgets** (`./scripts/setup-budget.sh`).
 
 > Budgets는 **청구 데이터 자체가 8~24시간 지연**됩니다.
-> 시간당 $0.93짜리 클러스터를 방치했을 때 알림이 울릴 즈음이면 이미 $20이 나간 뒤입니다.
+> 시간당 $1.5짜리 클러스터를 방치했을 때 알림이 울릴 즈음이면 이미 $30이 나간 뒤입니다.
 > 백스톱으로는 두되, 이걸 주 방어선으로 믿지 마세요.
 
 ---
@@ -922,9 +974,10 @@ ocp-aws-lab/
 ## 로드맵
 
 - [x] `preflight.sh` — 설치 전 쿼터·IAM·DNS 자동 점검
-- [x] `ai` 프로파일 + agent 스택 배포
-- [x] GPU MachineSet Day-2 (`gpu-node.sh`)
-- [x] Red Hat OpenShift AI 설치 + KServe 모델 서빙
+- [x] `ai` 프로파일 + `manifests/` + Day-2 스크립트 일습 작성
+- [ ] **agent 스택을 실제 클러스터에서 검증** (`deploy-agent-stack.sh`, `verify-agent-stack.sh`)
+- [ ] **GPU MachineSet 실제 검증** (`gpu-node.sh` 의 MachineSet 복제)
+- [ ] **RHOAI 설치 + KServe 서빙 실제 검증** (`alm-examples` 추출, vLLM 런타임 탐색)
 - [ ] `--baseline` 측정값을 `ocp-airgap-lab`의 같은 검사와 나란히 기록
 - [ ] RHOAI Data Science Pipelines 실습 (Elyra 파이프라인 1개)
 - [ ] TrustyAI와 Phoenix가 겹치는 부분 정리
