@@ -303,6 +303,9 @@ mmdc -i diagram.mmd -o out.png -b transparent -t dark -s 2
 | 파드가 스케줄조차 안 됨 | SCC. 이벤트가 Deployment 가 아니라 ReplicaSet 에 남습니다 |
 | ConfigMap 을 바꿨는데 반영이 안 됨 | 파드는 자동으로 다시 읽지 않습니다. `rollout restart` 가 필요합니다 |
 | `pip` / `npm` 이 Permission denied | OCP 임의 UID 가 `/` 를 홈으로 잡음. `HOME=/tmp` 를 넣으세요 |
+| 컨테이너에서 `whoami` 가 실패 | 임의 UID 가 `/etc/passwd` 에 없음. 기동 시 `fix-uid` 로 넣습니다 |
+| 이미지를 다시 빌드했는데 동작이 그대로 | `rollout restart` 는 spec 을 안 바꿉니다. 템플릿을 고쳤으면 `render-manifests.sh` + `oc apply` 까지 |
+| 콘솔 파드 Terminal 탭이 새까맣게 빈 화면 | 콘솔(OCP 4.22.6) 버그. xterm 이 1열 1행으로 잡힙니다. `Expand` 를 누르거나 창 크기를 바꾸면 나옵니다. 파드 문제가 아닙니다 |
 | destroy 후에도 과금이 계속됨 | Classic ELB, PVC 가 만든 EBS, 프라이빗 존. `verify-clean.sh` |
 
 ---

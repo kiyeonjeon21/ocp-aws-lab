@@ -1028,6 +1028,52 @@ AWS IPI는 `gp3-csi`가 기본으로 붙습니다. 없다면 EBS CSI Operator �
 `.env`의 `STORAGE_CLASS`로 직접 지정할 수도 있습니다.
 </details>
 
+<details>
+<summary><b>콘솔의 파드 Terminal 탭이 새까맣게 빈 화면</b></summary>
+
+파드 문제가 아닙니다. OCP 4.22.6 콘솔의 렌더링 버그입니다.
+
+Terminal 탭은 처음 열릴 때 xterm을 **1열 1행**으로 잡습니다.
+셸은 정상으로 붙고 프롬프트 바이트도 도착하는데, 그릴 자리가 없어서 검은 화면만 보입니다.
+
+**오른쪽 위 `Expand`를 누르거나 브라우저 창 크기를 바꾸면 나옵니다.**
+
+직접 확인한 근거입니다.
+
+```
+콘솔이 보내는 exec 명령을 pty로 재현      -> "(app-root) sh-5.1$ "  정상
+브라우저에서 .xterm-screen 크기 측정       -> 19x19 px, 행 1개
+resize 이벤트 1회                          -> 1315x567, 27행, 프롬프트 표시
+openshift-console 자신의 파드에서도 동일    -> 우리 이미지와 무관
+```
+
+애초에 tmux와 neovim을 쓸 자리가 아닙니다. 키 조합이 콘솔에 먹힙니다.
+제대로 쓰려면 로컬 터미널에서 들어가세요.
+
+```bash
+source scripts/env.sh
+oc rsh deploy/coding-agent
+```
+</details>
+
+<details>
+<summary><b>이미지를 다시 빌드했는데 컨테이너 동작이 그대로</b></summary>
+
+`oc rollout restart`는 **같은 spec으로 파드만 다시 만듭니다.**
+새 이미지는 받아 오지만 `command`, `args`, `env`는 옛날 것 그대로입니다.
+
+`Containerfile`과 `*.yaml.tpl`을 같이 고쳤다면 매니페스트까지 다시 적용해야 합니다.
+
+```bash
+./scripts/render-manifests.sh
+oc apply -f clusters/$CLUSTER_NAME/manifests/30-devtools/
+```
+
+실제로 이걸 빠뜨려서 `fix-uid` 호출이 빠진 채로 돌았습니다.
+증상은 컨테이너 안에서 `whoami`가 실패하는 것이었습니다.
+OCP는 임의 UID(`1000730000`)로 컨테이너를 띄우는데 그 UID가 `/etc/passwd`에 없으면 이름을 못 찾습니다.
+</details>
+
 ---
 
 ## 디렉토리 구조
