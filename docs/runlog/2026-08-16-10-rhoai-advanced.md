@@ -36,3 +36,4 @@
 </details>
 
 - `04:59:19` A단계 완료: ray/trainingoperator Managed, kueue Unmanaged, cert-manager 설치. DSC Ready. RayCluster/RayJob/PyTorchJob/ClusterQueue/LocalQueue CRD 사용 가능. MaaS 는 3.4.3 DSC 가 spec.components.modelsasservice 를 unknown field 로 거부
+- `05:02:27` MaaS/llm-d 조사 결론: llm-d 지원 가속기는 H100/H200/B200/A100 뿐이고 L4(g6)는 목록에 없음. AWS P 인스턴스 쿼터가 0 vCPU 라 A100 기동 자체가 불가. Red Hat Connectivity Link 는 카탈로그에 없고 Community kuadrant 만 존재. MaaS 는 llm-d + Connectivity Link + Gateway TLS + User Workload Monitoring + 외부 PostgreSQL 을 요구. 둘 다 이 랩에서 불가. MaaS 활성화 경로는 spec.components.kserve.modelsAsService.managementState (최상위 컴포넌트가 아님)

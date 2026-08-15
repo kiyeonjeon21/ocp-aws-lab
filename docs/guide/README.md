@@ -10,9 +10,9 @@
 
 각 항목은 이렇게 구성됩니다.
 
-- **언제** - 어느 단계를 마친 뒤에 보는 화면인지
-- **판정 기준** - 이 화면에서 눈으로 확인할 것
-- **어긋나면** - 다를 때 어디를 보는지
+- 확인 시점 - 어느 단계를 마친 뒤에 보는 화면인지
+- 판정 기준 - 이 화면에서 눈으로 확인할 것
+- 어긋나면 - 다를 때 어디를 보는지
 
 ## 세대가 바뀌면
 
@@ -32,11 +32,11 @@
 
 ![앱 런처](images/01-app-launcher.jpg)
 
-**언제**: `deploy-agent-stack.sh` 와 `70-console` 매니페스트 적용 후.
+확인 시점: `deploy-agent-stack.sh` 와 `70-console` 매니페스트 적용 후.
 
 콘솔 오른쪽 위 격자 아이콘을 누르면 나옵니다.
 
-**판정 기준**
+이 화면에서 확인할 것들입니다.
 
 - `AI 랩` 섹션이 있고 항목이 5개입니다.
   LangGraph agent / LiteLLM / Open WebUI / Phoenix / 코딩 에이전트
@@ -48,7 +48,7 @@
 **여기가 이 랩의 "홈 화면" 입니다.**
 별도 포털을 만들지 않은 이유는 [consolelinks.yaml.tpl](../../manifests/70-console/consolelinks.yaml.tpl) 주석에 적어 두었습니다.
 
-**어긋나면**: `oc get consolelink` 로 등록 여부를 봅니다.
+어긋나면: `oc get consolelink` 로 등록 여부를 봅니다.
 브라우저 캐시 때문에 안 보일 때가 있어 새로고침을 한 번 하세요.
 
 ---
@@ -57,9 +57,9 @@
 
 ![agent-lab 파드](images/02-agent-lab-pods.jpg)
 
-**언제**: `deploy-agent-stack.sh` 이후. `verify-agent-stack.sh` 가 통과한 상태입니다.
+확인 시점: `deploy-agent-stack.sh` 이후. `verify-agent-stack.sh` 가 통과한 상태입니다.
 
-**판정 기준**
+이 화면에서 확인할 것들입니다.
 
 Ready 열의 숫자가 이 랩의 SSO 설계를 그대로 보여 줍니다.
 
@@ -76,7 +76,7 @@ Ready 열의 숫자가 이 랩의 SSO 설계를 그대로 보여 줍니다.
 `coding-agent-N-build` 가 `Completed` 로 남아 있는 것은 정상입니다.
 이미지 빌드 기록이라 지워도 됩니다.
 
-**어긋나면**: 2/2 여야 할 것이 1/1 이면 매니페스트를 다시 적용하지 않은 것입니다.
+어긋나면: 2/2 여야 할 것이 1/1 이면 매니페스트를 다시 적용하지 않은 것입니다.
 `rollout restart` 는 spec 을 바꾸지 않습니다.
 `render-manifests.sh` 후 `oc apply` 까지 해야 합니다.
 
@@ -86,9 +86,9 @@ Ready 열의 숫자가 이 랩의 SSO 설계를 그대로 보여 줍니다.
 
 ![Phoenix SSO](images/03-phoenix-sso.jpg)
 
-**언제**: Phoenix / Open WebUI / LangGraph 에 접속했을 때. 로그인 세션이 없으면 이게 먼저 나옵니다.
+확인 시점: Phoenix / Open WebUI / LangGraph 에 접속했을 때. 로그인 세션이 없으면 이게 먼저 나옵니다.
 
-**판정 기준**
+이 화면에서 확인할 것들입니다.
 
 - `Log in with OpenShift` 버튼
 - 아래에 작게 **`Secured with OpenShift oauth-proxy`**
@@ -106,7 +106,7 @@ Phoenix 는 원래 로그인 개념이 없는 도구입니다.
 
 프롬프트와 응답 전문이 쌓이는 곳이라 그대로 두면 안 됩니다.
 
-**어긋나면**: 이 화면 없이 앱이 바로 열리면 프록시를 안 거친 것입니다.
+어긋나면: 이 화면 없이 앱이 바로 열리면 프록시를 안 거친 것입니다.
 `verify-agent-stack.sh 5` 가 이걸 검사합니다.
 반대로 로그인 후에도 403 이면 `system:auth-delegator` ClusterRoleBinding 이 없는 경우입니다.
 
@@ -116,9 +116,9 @@ Phoenix 는 원래 로그인 개념이 없는 도구입니다.
 
 ![노드 목록](images/04-nodes.jpg)
 
-**언제**: 아무 때나. GPU 를 올리기 전후로 비교하면 좋습니다.
+확인 시점: 아무 때나. GPU 를 올리기 전후로 비교하면 좋습니다.
 
-**판정 기준**
+이 화면에서 확인할 것들입니다.
 
 - 노드 6개. 마스터 3 + 워커 3 입니다.
 - `Machine set` 열이 출처를 말해 줍니다.

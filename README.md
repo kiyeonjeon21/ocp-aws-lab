@@ -1162,8 +1162,11 @@ ocp-aws-lab/
 - [x] **Data Science Pipelines** — DSPA + MinIO + MariaDB. iris 샘플 Succeeded, MinIO 에 산출물 확인
 - [x] **SSO 통합** — Open WebUI / LangGraph 에 oauth-proxy. 인증 없이 열려 있던 구멍을 닫음
 - [x] **앱 런처 등록** — `ConsoleLink` 로 콘솔 격자 메뉴에 "AI 랩" 섹션. 별도 홈 화면을 만들지 않음
+- [x] **분산 컴포넌트 활성화** — `install-rhoai.sh distributed`. Ray / Kueue / TrainingOperator + cert-manager
+- [x] **MaaS·llm-d 실현 가능성 조사** — 결론은 불가. 이유는 [docs/maas-llm-d.md](docs/maas-llm-d.md)
 - [ ] **Keycloak(RHBK)** — htpasswd 다음 단계. OIDC 로 외부 IdP 연동
 - [ ] **파인튜닝(LoRA)** — GPU 1대에서는 서빙과 동시 불가. 순서를 나눠야 함
+- [ ] **Ray 분산 처리** — 헤드는 CPU, 워커에 GPU 1장
 - [ ] `--baseline` 측정값을 `ocp-airgap-lab`의 같은 검사와 나란히 기록
 - [ ] RHOAI Data Science Pipelines 실습 (Elyra 파이프라인 1개)
 - [ ] TrustyAI와 Phoenix가 겹치는 부분 정리
