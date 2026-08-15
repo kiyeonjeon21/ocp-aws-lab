@@ -60,14 +60,27 @@ spec:
       # S3 를 쓰려면 여기가 s3:// 가 되고 Secret 에 자격증명이 필요합니다.
       # 폐쇄망에서는 대개 S3 호환(MinIO) 아니면 OCI 이미지를 씁니다.
       storageUri: pvc://model-cache/${MODEL_DIR}
+      # ------------------------------------------------------------
+      # GPU VRAM 과 호스트 RAM 은 다릅니다. 헷갈리기 쉽습니다.
+      # ------------------------------------------------------------
+      # g6.xlarge 는 L4 가 24GB 지만 인스턴스 자체 RAM 은 16GB 입니다.
+      # allocatable 로 내려오면 13.9Gi 이고, 시스템 파드가 2.4Gi 를 이미 씁니다.
+      #
+      # 여기 memory 는 GPU 메모리가 아니라 호스트 메모리입니다.
+      # 모델 크기(15GB)를 보고 16Gi 를 적었다가 스케줄조차 안 됐습니다.
+      #   0/7 nodes are available: 1 Insufficient memory
+      #
+      # 가중치는 호스트 RAM 에 통째로 올라가지 않습니다.
+      # safetensors 를 mmap 해서 GPU 로 스트리밍하므로 호스트 쪽 피크는 훨씬 작습니다.
+      # GPU 메모리는 아래 --gpu-memory-utilization 이 담당합니다.
       resources:
         requests:
           cpu: "2"
-          memory: 16Gi
+          memory: 8Gi
           nvidia.com/gpu: "1"
         limits:
           cpu: "3"
-          memory: 24Gi
+          memory: 11Gi
           # GPU 는 requests 와 limits 가 같아야 합니다.
           # 다르게 쓰면 kubelet 이 거부합니다. 확장 리소스의 규칙입니다.
           nvidia.com/gpu: "1"

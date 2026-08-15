@@ -1052,6 +1052,9 @@ ocp-aws-lab/
 │   │   ├── qdrant.yaml.tpl
 │   │   ├── open-webui.yaml.tpl
 │   │   └── phoenix.yaml.tpl
+│   ├── 30-devtools/            # 클러스터 안 개발 환경
+│   │   ├── Containerfile       # nvim · tmux · rg · fd · aider
+│   │   └── coding-agent.yaml.tpl
 │   └── 50-rhoai/
 │       ├── 10-model-storage.yaml.tpl
 │       └── 20-inferenceservice.yaml.tpl
@@ -1074,8 +1077,10 @@ ocp-aws-lab/
 │   ├── install-rhoai.sh        # NFD + NVIDIA GPU Operator + RHOAI
 │   ├── deploy-model.sh         # 가중치 다운로드 + InferenceService
 │   ├── switch-backend.sh       # LiteLLM api_base 전환 (llama.cpp <-> vLLM)
+│   ├── build-devimage.sh       # 개발 도구 이미지를 클러스터 안에서 빌드
 │   └── runlog.sh               # 실행 기록. new / note / res / run / done
 ├── docs/
+│   ├── storage.md              # gp3-csi / EFS / ODF 선택 기준
 │   ├── runlog/                 # 실습 기록. 커밋합니다
 │   │   └── TEMPLATE.md
 │   └── snapshots/              # 세대별 클러스터 상태. snapshot.sh 가 생성
@@ -1094,9 +1099,14 @@ ocp-aws-lab/
 
 - [x] `preflight.sh` — 설치 전 쿼터·IAM·DNS 자동 점검
 - [x] `ai` 프로파일 + `manifests/` + Day-2 스크립트 일습 작성
-- [ ] **agent 스택을 실제 클러스터에서 검증** (`deploy-agent-stack.sh`, `verify-agent-stack.sh`)
-- [ ] **GPU MachineSet 실제 검증** (`gpu-node.sh` 의 MachineSet 복제)
-- [ ] **RHOAI 설치 + KServe 서빙 실제 검증** (`alm-examples` 추출, vLLM 런타임 탐색)
+- [x] **agent 스택 실제 검증** — 검사 7종 통과, CPU 추론 30 tok/s
+- [x] **GPU MachineSet 실제 검증** — 워커 MachineSet 복제로 g6.xlarge 생성
+- [x] **RHOAI 3.4.3 + KServe 서빙 실제 검증** — `alm-examples` 추출, vLLM 런타임 9개 중 CUDA 선택
+- [x] **클러스터 안 코딩 에이전트** — nvim/tmux/LazyVim + aider 가 내부 Service 로 GPU 모델 호출
+- [ ] **IdP 연동** — 지금은 `kubeadmin` 뿐. htpasswd 또는 Keycloak
+- [ ] **LangGraph 기반 agent 플랫폼** — 상태 저장(체크포인터)까지 포함
+- [ ] **Data Science Pipelines 실습** — S3 연동 + 파이프라인 1개
+- [ ] **파인튜닝(LoRA)** — GPU 1대에서는 서빙과 동시 불가. 순서를 나눠야 함
 - [ ] `--baseline` 측정값을 `ocp-airgap-lab`의 같은 검사와 나란히 기록
 - [ ] RHOAI Data Science Pipelines 실습 (Elyra 파이프라인 1개)
 - [ ] TrustyAI와 Phoenix가 겹치는 부분 정리

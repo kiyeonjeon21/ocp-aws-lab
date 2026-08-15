@@ -101,6 +101,9 @@ load_ai_env() {
   : "${IMAGE_PHOENIX:=docker.io/arizephoenix/phoenix:latest}"
   : "${IMAGE_UBI:=registry.access.redhat.com/ubi9/ubi-minimal:latest}"
   : "${IMAGE_PYTHON:=registry.access.redhat.com/ubi9/python-311:latest}"
+  # 개발 도구 이미지. build-devimage.sh 로 만든 뒤 이 값을 내부 레지스트리 경로로 바꿉니다.
+  # 기본값은 빌드 전에도 파드가 뜨도록 python 이미지를 그대로 씁니다(도구는 없음).
+  : "${IMAGE_DEVTOOLS:=$IMAGE_PYTHON}"
 
   # 모델 가중치.
   # 인터넷이 있는 클러스터라서 initContainer 가 런타임에 받아옵니다.
@@ -117,7 +120,12 @@ load_ai_env() {
   #
   # Coder-7B 는 fp16 으로 약 15GB 라 L4 24GB 에 그대로 들어갑니다.
   # GPU 를 g6.xlarge 에서 더 키우지 않아도 됩니다.
-  : "${VLLM_MODEL_NAME:=qwen2.5-coder-7b}"
+  # 점(.)을 쓰면 안 됩니다.
+  # 이 값이 InferenceService 의 이름이 되는데, KServe 는 DNS-1035 를 강제합니다.
+  #   regex: [a-z]([-a-z0-9]*[a-z0-9])?
+  # qwen2.5-coder-7b 로 뒀다가 admission webhook 에 거부당했습니다.
+  # llama.cpp 쪽 MODEL_NAME 은 쿠버네티스 리소스 이름이 아니라서 점이 있어도 됩니다.
+  : "${VLLM_MODEL_NAME:=qwen25-coder-7b}"
   : "${MODEL_HF_REPO:=Qwen/Qwen2.5-Coder-7B-Instruct}"
   # 7B fp16 이 24GB 의 대부분을 씁니다. 1.5B 때의 0.55 로는 KV 캐시가 안 잡힙니다.
   : "${VLLM_GPU_UTIL:=0.90}"
@@ -131,7 +139,7 @@ load_ai_env() {
 
   export AGENT_NAMESPACE RHOAI_NAMESPACE STORAGE_CLASS AGENT_OFFLINE
   export IMAGE_LLAMA IMAGE_LITELLM IMAGE_QDRANT IMAGE_OPENWEBUI IMAGE_PHOENIX
-  export IMAGE_UBI IMAGE_PYTHON
+  export IMAGE_UBI IMAGE_PYTHON IMAGE_DEVTOOLS
   export MODEL_NAME MODEL_URL MODEL_HF_REPO
   export VLLM_MODEL_NAME VLLM_GPU_UTIL VLLM_MAX_LEN
   export GPU_INSTANCE_TYPE GPU_VOLUME_SIZE

@@ -74,8 +74,13 @@ pick_runtime() {   # $1: jq 로 뽑은 이름 목록
   head -1 <<<"$names"
 }
 
+# 끝의 || true 가 필요합니다.
+# RHOAI 3.4 는 ClusterServingRuntime CRD 를 만들지 않습니다. 런타임을 Template 으로만 냅니다.
+# 그러면 oc get 이 "the server doesn't have a resource type" 으로 exit 1 을 내고,
+# pipefail + set -e 때문에 아래 Template 탐색까지 가 보지도 못하고 스크립트가 죽습니다.
+# 종료 코드도 메시지도 안 남아서 원인이 안 보입니다.
 CSR_NAMES=$(oc get clusterservingruntime -o json 2>/dev/null \
-  | jq -r '.items[] | select([.spec.supportedModelFormats[]?.name] | index("vLLM")) | .metadata.name')
+  | jq -r '.items[] | select([.spec.supportedModelFormats[]?.name] | index("vLLM")) | .metadata.name' 2>/dev/null || true)
 SERVING_RUNTIME=""
 [[ -n "$CSR_NAMES" ]] && SERVING_RUNTIME=$(pick_runtime "$CSR_NAMES")
 
@@ -84,8 +89,8 @@ if [[ -n "$SERVING_RUNTIME" ]]; then
 else
   # 네임스페이스 안에 이미 만들어 둔 게 있는지
   SERVING_RUNTIME=$(oc get servingruntime -n "$RHOAI_NAMESPACE" -o json 2>/dev/null \
-    | jq -r '.items[] | select([.spec.supportedModelFormats[]?.name] | index("vLLM")) | .metadata.name' \
-    | head -1)
+    | jq -r '.items[] | select([.spec.supportedModelFormats[]?.name] | index("vLLM")) | .metadata.name' 2>/dev/null \
+    | head -1 || true)
 fi
 
 if [[ -z "$SERVING_RUNTIME" ]]; then
@@ -129,7 +134,7 @@ if [[ "$SKIP_DL" == false ]]; then
   head1 "3. 가중치 다운로드"
   oc apply -f "$M/10-model-storage.yaml" >/dev/null
   ok "PVC + Job 적용"
-  info "$MODEL_HF_REPO 를 받습니다 (약 3GB, 2~5분)"
+  info "$MODEL_HF_REPO 를 받습니다 (약 15GB, 5~10분)"
 
   if oc wait --for=condition=complete job/download-model \
        -n "$RHOAI_NAMESPACE" --timeout=1200s >/dev/null 2>&1; then
@@ -153,7 +158,7 @@ ok "적용됨"
 info "vLLM 이 가중치를 로딩하고 CUDA 그래프를 만듭니다. 3~8분 걸립니다."
 printf "  "
 for _ in $(seq 1 60); do
-  READY=$(oc get inferenceservice "$MODEL_NAME" -n "$RHOAI_NAMESPACE" \
+  READY=$(oc get inferenceservice "$VLLM_MODEL_NAME" -n "$RHOAI_NAMESPACE" \
             -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)
   [[ "$READY" == "True" ]] && { printf "\n"; ok "InferenceService Ready"; break; }
   printf "."
@@ -163,8 +168,8 @@ printf "\n"
 
 if [[ "$READY" != "True" ]]; then
   bad "Ready 가 되지 않았습니다"
-  info "  oc describe inferenceservice $MODEL_NAME -n $RHOAI_NAMESPACE"
-  info "  oc logs -n $RHOAI_NAMESPACE -l serving.kserve.io/inferenceservice=$MODEL_NAME --all-containers --tail=50"
+  info "  oc describe inferenceservice $VLLM_MODEL_NAME -n $RHOAI_NAMESPACE"
+  info "  oc logs -n $RHOAI_NAMESPACE -l serving.kserve.io/inferenceservice=$VLLM_MODEL_NAME --all-containers --tail=50"
   exit 1
 fi
 
@@ -172,10 +177,10 @@ fi
 head1 "5. 엔드포인트"
 # RawDeployment 모드에서는 Service 이름이 <isvc>-predictor 입니다.
 # 클러스터 내부에서 부를 주소가 이겁니다. LiteLLM 이 여기로 붙습니다.
-SVC="${MODEL_NAME}-predictor.${RHOAI_NAMESPACE}.svc.cluster.local"
+SVC="${VLLM_MODEL_NAME}-predictor.${RHOAI_NAMESPACE}.svc.cluster.local"
 ok "내부 주소  http://${SVC}:8080/v1"
 
-URL=$(oc get inferenceservice "$MODEL_NAME" -n "$RHOAI_NAMESPACE" \
+URL=$(oc get inferenceservice "$VLLM_MODEL_NAME" -n "$RHOAI_NAMESPACE" \
         -o jsonpath='{.status.url}' 2>/dev/null || true)
 [[ -n "$URL" ]] && info "외부 URL   $URL"
 

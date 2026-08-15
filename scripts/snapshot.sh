@@ -57,6 +57,8 @@ printf '| RHOAI | %s |\n' "$(oc get csv -n redhat-ods-operator -o jsonpath='{.it
 printf '| NVIDIA GPU Operator | %s |\n' "$(oc get csv -n nvidia-gpu-operator -o name 2>/dev/null | sed 's|.*/||' | grep -m1 gpu | d)"
 printf '| 채팅 모델 | %s |\n' "$MODEL_NAME"
 printf '| 서빙 모델 | %s (%s) |\n' "$VLLM_MODEL_NAME" "$MODEL_HF_REPO"
+printf '| vLLM 런타임 | %s |\n' "$(oc get servingruntime -n "$RHOAI_NAMESPACE" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null | d)"
+printf '| 개발 도구 이미지 | %s |\n' "$(oc get deploy coding-agent -n "$AGENT_NAMESPACE" -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null | sed 's|.*/||' | d)"
 
 printf '\n## 노드\n\n'
 printf '| 이름 | 역할 | 타입 | CPU | 메모리 | 상태 |\n| --- | --- | --- | --- | --- | --- |\n'
@@ -98,8 +100,17 @@ oc get route -A -o json 2>/dev/null | jq -r '
   | select(.metadata.namespace | test("^(openshift-console|agent-lab|redhat-ods-applications|ai-serving)$"))
   | "| \(.metadata.namespace)/\(.metadata.name) | `https://\(.spec.host)` |"' | sort
 
+printf '\n## 모델 서빙\n\n'
+if oc get inferenceservice -A --no-headers >/dev/null 2>&1; then
+  printf '| 이름 | 네임스페이스 | Ready | URL |\n| --- | --- | --- | --- |\n'
+  oc get inferenceservice -A -o json 2>/dev/null | jq -r '
+    .items[] | "| \(.metadata.name) | \(.metadata.namespace) | \([.status.conditions[]?|select(.type=="Ready")|.status]|join("")) | `\(.status.url // "-")` |"'
+else
+  printf '%s\n' "InferenceService 없음 (KServe 미설치 또는 미배포)"
+fi
+
 printf '\n## 워크로드\n\n'
-for ns in agent-lab ai-serving; do
+for ns in "$AGENT_NAMESPACE" "$RHOAI_NAMESPACE"; do
   oc get ns "$ns" >/dev/null 2>&1 || continue
   printf '### %s\n\n' "$ns"
   printf '| 파드 | 상태 | 노드 |\n| --- | --- | --- |\n'

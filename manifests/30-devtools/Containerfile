@@ -1,0 +1,149 @@
+# 클러스터 안에서 쓰는 개발 환경 이미지.
+#
+# ------------------------------------------------------------------
+# 왜 이미지를 따로 만드나
+# ------------------------------------------------------------------
+# OCP 는 이미지에 적힌 USER 를 무시하고 네임스페이스마다 배정된 임의 UID 로
+# 컨테이너를 돌립니다. 그 UID 는 root 가 아니므로 런타임에 dnf install 을 못 합니다.
+#
+#   $ id -u
+#   1000730000
+#   $ dnf install -y tmux
+#   불가
+#
+# 그래서 필요한 도구는 전부 빌드 시점에 넣어야 합니다.
+# 이건 폐쇄망이든 아니든 OCP 에서 똑같이 적용되는 제약입니다.
+#
+# ------------------------------------------------------------------
+# 무엇이 이미지에 들어가고 무엇이 PVC 에 남나
+# ------------------------------------------------------------------
+#   이미지  바이너리 (nvim, tmux, rg, fd, aider)      바뀌면 다시 빌드
+#   PVC     설정과 플러그인 (~/.config, ~/.local)      파드가 죽어도 남음
+#
+# HOME 을 /workspace(PVC)로 잡아 두었으므로 LazyVim 이 받은 플러그인과
+# 설정이 파드 재시작을 넘어 살아남습니다.
+FROM registry.access.redhat.com/ubi9/python-311
+
+USER 0
+
+# UBI9 저장소에 있는 것들.
+# tmux / ripgrep / fd 는 UBI 에 없습니다. 아래에서 따로 넣습니다.
+#
+# UBI 는 RHEL 패키지의 일부만 담습니다. 구독 없이 쓸 수 있는 대신 목록이 좁습니다.
+# 'dnf install tmux' 가 'No match for argument: tmux' 로 실패하는 이유입니다.
+RUN dnf install -y --nodocs \
+      git gcc gcc-c++ make tar gzip unzip findutils which procps-ng \
+ && dnf clean all \
+ && rm -rf /var/cache/dnf
+
+# ------------------------------------------------------------------
+# tmux
+# ------------------------------------------------------------------
+# UBI 에 패키지가 없어서 두 경로를 순서대로 시도합니다.
+#   1. CodeReady Builder 저장소에 개발 패키지가 있으면 소스 빌드 (네이티브, 가장 깔끔)
+#   2. 없으면 AppImage 를 받아 추출 (FUSE 없이 --appimage-extract 로 풀립니다)
+# 하나라도 되면 통과하고, 둘 다 실패하면 빌드를 세웁니다.
+RUN set -eux; \
+    cd /tmp; \
+    if dnf install -y --nodocs libevent-devel ncurses-devel bison pkgconf-pkg-config 2>/dev/null; then \
+      TMUX_V=$(curl -fsSL https://api.github.com/repos/tmux/tmux/releases/latest | grep -o '"tag_name": *"[^"]*"' | head -1 | sed 's/.*"\([0-9.a-z]*\)"$/\1/'); \
+      curl -fsSL "https://github.com/tmux/tmux/releases/download/${TMUX_V}/tmux-${TMUX_V}.tar.gz" | tar xz; \
+      cd "tmux-${TMUX_V}" && ./configure --prefix=/usr/local >/dev/null && make -j"$(nproc)" >/dev/null && make install; \
+      dnf clean all; \
+    else \
+      curl -fsSL -o tmux.appimage \
+        https://github.com/nelsonenzo/tmux-appimage/releases/latest/download/tmux.appimage; \
+      chmod +x tmux.appimage && ./tmux.appimage --appimage-extract >/dev/null; \
+      mv squashfs-root /opt/tmux; \
+      printf '#!/bin/sh\nexec /opt/tmux/AppRun "$@"\n' > /usr/local/bin/tmux; \
+      chmod +x /usr/local/bin/tmux; \
+    fi; \
+    rm -rf /tmp/*; \
+    tmux -V
+
+# ------------------------------------------------------------------
+# Neovim
+# ------------------------------------------------------------------
+# UBI 기본 저장소에는 neovim 이 없고, EPEL 을 붙여도 LazyVim 이 요구하는
+# 0.9+ 보다 낮은 경우가 많습니다. 공식 릴리스 tarball 이 확실합니다.
+# 파일 이름이 버전에 따라 바뀌어서 둘 다 시도합니다.
+RUN set -eux; \
+    cd /tmp; \
+    for f in nvim-linux-x86_64.tar.gz nvim-linux64.tar.gz; do \
+      if curl -fsSL -o nvim.tar.gz \
+        "https://github.com/neovim/neovim/releases/latest/download/$f"; then break; fi; \
+    done; \
+    tar xzf nvim.tar.gz -C /opt; \
+    ln -sf /opt/nvim-linux*/bin/nvim /usr/local/bin/nvim; \
+    rm -f nvim.tar.gz; \
+    nvim --version | head -1
+
+# ------------------------------------------------------------------
+# ripgrep / fd
+# ------------------------------------------------------------------
+# LazyVim 의 파일 검색(telescope)이 이 둘을 씁니다.
+# 없어도 뜨긴 하지만 검색이 눈에 띄게 느립니다.
+RUN set -eux; \
+    cd /tmp; \
+    RG=$(curl -fsSL https://api.github.com/repos/BurntSushi/ripgrep/releases/latest \
+         | grep -o 'https://[^"]*x86_64-unknown-linux-musl.tar.gz' | head -1); \
+    curl -fsSL "$RG" | tar xz; \
+    install -m755 ripgrep-*/rg /usr/local/bin/rg; \
+    FD=$(curl -fsSL https://api.github.com/repos/sharkdp/fd/releases/latest \
+         | grep -o 'https://[^"]*x86_64-unknown-linux-musl.tar.gz' | head -1); \
+    curl -fsSL "$FD" | tar xz; \
+    install -m755 fd-*/fd /usr/local/bin/fd; \
+    rm -rf /tmp/*; \
+    rg --version | head -1; fd --version
+
+# ------------------------------------------------------------------
+# 코딩 에이전트
+# ------------------------------------------------------------------
+# aider 는 내부적으로 LiteLLM 을 씁니다. base_url 만 주면 붙습니다.
+# Continue.dev / Cline / OpenCode 도 같은 두 값만 받으므로 바꿔 끼울 수 있습니다.
+RUN pip install --no-cache-dir aider-chat \
+ && aider --version
+
+# LazyVim 을 처음 한 번 받는 헬퍼.
+# 이미지에 굽지 않고 런타임에 PVC 로 받습니다. 사용자 설정이라 이미지에 고정하면 못 고칩니다.
+# 폐쇄망에서는 이 clone 이 막히므로 플러그인을 미리 반입해야 합니다.
+# ocp-airgap-lab 의 npx/pypi 문제와 정확히 같은 종류입니다.
+RUN printf '%s\n' \
+  '#!/bin/sh' \
+  'set -e' \
+  ': "${XDG_CONFIG_HOME:=$HOME/.config}"' \
+  'if [ -d "$XDG_CONFIG_HOME/nvim" ]; then echo "이미 있습니다: $XDG_CONFIG_HOME/nvim"; exit 0; fi' \
+  'mkdir -p "$XDG_CONFIG_HOME"' \
+  'git clone --depth 1 https://github.com/LazyVim/starter "$XDG_CONFIG_HOME/nvim"' \
+  'rm -rf "$XDG_CONFIG_HOME/nvim/.git"' \
+  'echo "완료. nvim 을 실행하면 플러그인을 받습니다."' \
+  > /usr/local/bin/lazyvim-init && chmod +x /usr/local/bin/lazyvim-init
+
+# ------------------------------------------------------------------
+# 임의 UID 대응
+# ------------------------------------------------------------------
+# OCP 는 UID 를 바꾸지만 GID 는 0 으로 두므로 group 권한이 실질적인 통로입니다.
+RUN chgrp -R 0 /opt /usr/local/bin && chmod -R g=u /opt /usr/local/bin
+
+# /etc/passwd 를 그룹 쓰기 가능하게 열어 둡니다.
+#
+# 배정된 UID(예: 1000730000)는 /etc/passwd 에 없습니다.
+# getpwuid() 를 부르는 프로그램이 그 자리에서 실패합니다.
+# tmux 가 대표적입니다. 오류 한 줄 없이 서버가 즉시 죽고 이렇게만 보입니다.
+#   no server running on /tmp/tmux-1000730000/default
+#
+# 아래 엔트리포인트가 기동할 때 자기 UID 를 한 줄 추가해서 해결합니다.
+# OpenShift 임의 UID 환경의 표준 대응이고, tmux 말고도 getpwuid 를 쓰는
+# 도구(ssh, git 일부 경로, shell 프롬프트)가 같이 덕을 봅니다.
+RUN chmod g+w /etc/passwd
+
+RUN printf '%s\n' \
+  '#!/bin/sh' \
+  'if ! whoami >/dev/null 2>&1; then' \
+  '  echo "dev:x:$(id -u):0:dev user:${HOME}:/bin/bash" >> /etc/passwd 2>/dev/null || true' \
+  'fi' \
+  'exec "$@"' \
+  > /usr/local/bin/fix-uid && chmod +x /usr/local/bin/fix-uid
+
+USER 1001
+WORKDIR /workspace
