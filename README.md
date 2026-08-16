@@ -2,6 +2,14 @@
 
 AWS 위에 **OpenShift Container Platform(OCP)** 클러스터를 IPI 방식으로 설치하고, 연습이 끝나면 깨끗하게 지우기 위한 실습 레포입니다.
 
+> 랩이 셋 있고 **셋 다 AWS 위**에서 돕니다. 차이는 AWS 를 어떻게 쓰느냐입니다.
+>
+> | 레포 | 설치 | 워크로드 |
+> | --- | --- | --- |
+> | ocp-aws-lab | IPI, 클라우드 통합 켬 | AI (agent 스택 + RHOAI) |
+> | [ocp-airgap-lab](../ocp-airgap-lab) | UPI, 통합 봉인 | AI (같은 스택, 인터넷 없이) |
+> | [ocp-data-lab](../ocp-data-lab) | IPI, 클라우드 통합 켬 | 데이터 (Kafka, Spark, Trino) |
+
 목표는 네 가지입니다.
 
 1. `openshift-install` 기반 설치를 **반복 가능하게** 만든다
