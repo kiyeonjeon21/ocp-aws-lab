@@ -125,7 +125,7 @@ ODF 를 제대로 하려면 `ai` 프로파일부터 3 AZ 로 다시 짜야 합�
 붙일 만한 시점은 둘입니다.
 
 1. **GPU 노드를 2대 이상으로 늘려 모델을 공유할 때** - 그때도 AWS 면 EFS 가 ODF 보다 싸고 간단합니다
-2. **[ocp-airgap-lab](../../ocp-airgap-lab) 에서 S3 가 없을 때** - 이쪽이 진짜 ODF 가 필요한 케이스입니다
+2. **[ocp-airgap-lab](https://github.com/kiyeonjeon21/ocp-airgap-lab) 에서 S3 가 없을 때** - 이쪽이 진짜 ODF 가 필요한 케이스입니다
 
 즉 **AWS 에서는 대개 안 붙이고, 폐쇄망에서 필요해집니다.**
 폐쇄망 레포에서 다룰 주제입니다.

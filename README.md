@@ -7,8 +7,8 @@ AWS 위에 **OpenShift Container Platform(OCP)** 클러스터를 IPI 방식으�
 > | 레포 | 설치 | 워크로드 |
 > | --- | --- | --- |
 > | ocp-aws-lab | IPI, 클라우드 통합 켬 | AI (agent 스택 + RHOAI) |
-> | [ocp-airgap-lab](../ocp-airgap-lab) | UPI, 통합 봉인 | AI (같은 스택, 인터넷 없이) |
-> | [ocp-data-lab](../ocp-data-lab) | IPI, 클라우드 통합 켬 | 데이터 (Kafka, Spark, Trino) |
+> | [ocp-airgap-lab](https://github.com/kiyeonjeon21/ocp-airgap-lab) | UPI, 통합 봉인 | AI (같은 스택, 인터넷 없이) |
+> | [ocp-data-lab](https://github.com/kiyeonjeon21/ocp-data-lab) | IPI, 클라우드 통합 켬 | 데이터 (Kafka, Spark, Trino) |
 
 목표는 네 가지입니다.
 
@@ -669,7 +669,7 @@ HuggingFace도 GitHub도 응답하니까요.
 
 ### ocp-airgap-lab과의 관계
 
-[ocp-airgap-lab](../ocp-airgap-lab)은 AWS 위에 고객사 폐쇄망을 재현하고 같은 agent 스택을 올립니다.
+[ocp-airgap-lab](https://github.com/kiyeonjeon21/ocp-airgap-lab)은 AWS 위에 고객사 폐쇄망을 재현하고 같은 agent 스택을 올립니다.
 겹치는 건 그 스택 한 층뿐이고 아래는 전부 다릅니다.
 
 | 층 | 여기 | ocp-airgap-lab |

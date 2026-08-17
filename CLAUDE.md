@@ -5,7 +5,7 @@ AWS 에 OpenShift 를 IPI 로 설치하고, 그 위에 agent 스택과 Red Hat O
 배경과 전체 그림은 [README.md](README.md) 에 있습니다.
 이 파일은 **이 레포에서 작업할 때 지켜야 하는 규칙**만 담습니다.
 
-폐쇄망 버전은 [ocp-airgap-lab](../ocp-airgap-lab) 입니다.
+폐쇄망 버전은 [ocp-airgap-lab](https://github.com/kiyeonjeon21/ocp-airgap-lab) 입니다.
 같은 스택을 인터넷 없는 환경에 올립니다. 두 레포는 짝으로 봐야 의미가 있습니다.
 
 ---
