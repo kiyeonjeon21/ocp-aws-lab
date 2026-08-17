@@ -22,3 +22,6 @@ id_ocp_lab.pub
 # 실행 기록의 임시 포인터 (기록 본문 docs/runlog/*.md 는 커밋합니다)
 docs/runlog/.current
 docs/runlog/*.started
+
+# 발행 전 초안 (LinkedIn / 블로그). 레포에 넣지 않습니다.
+writeup/
