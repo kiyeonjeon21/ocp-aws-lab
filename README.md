@@ -669,22 +669,74 @@ HuggingFace도 GitHub도 응답하니까요.
 
 ### ocp-airgap-lab과의 관계
 
-[ocp-airgap-lab](../ocp-airgap-lab)은 AWS 위에 고객사 폐쇄망을 재현하고 같은 스택을 올립니다.
+[ocp-airgap-lab](../ocp-airgap-lab)은 AWS 위에 고객사 폐쇄망을 재현하고 같은 agent 스택을 올립니다.
+겹치는 건 그 스택 한 층뿐이고 아래는 전부 다릅니다.
 
-이쪽 `manifests/**/*.yaml.tpl`은 이미지 경로와 StorageClass, 오프라인 스위치를 전부 변수로 빼 두었습니다.
-**목표는 두 레포의 템플릿을 바이트 단위로 같게 두고, 차이를 `.env`에만 두는 것입니다.**
-
-> 현재 `ocp-airgap-lab` 쪽은 아직 미러 경로를 하드코딩하고 있습니다.
-> 같은 변수 이름으로 맞추는 작업이 남아 있고, 그 전까지 두 레포의 템플릿은 다릅니다.
-
-| 변수 | 여기 | ocp-airgap-lab |
+| 층 | 여기 | ocp-airgap-lab |
 | --- | --- | --- |
-| `IMAGE_*` | `ghcr.io/...`, `docker.io/...` | `registry.lab.internal:8443/...` |
-| `STORAGE_CLASS` | `gp3-csi` (IPI 기본) | `nfs` (직접 만들어야 함) |
-| `AGENT_OFFLINE` | `false` | `true` |
+| 설치 방식 | IPI. 설치기가 VPC·NAT·LB·Route53까지 만듭니다 | UPI `platform: none`. 전부 직접 |
+| DNS / LB | Route53 + NLB/CLB | dnsmasq + HAProxy |
+| StorageClass | `gp3-csi`. IPI가 줍니다 | 없음. NFS로 직접 만듭니다 |
+| 이미지 출처 | 인터넷에서 그대로 | `oc-mirror`로 41GB 반입 |
+| 노드 증설 | `gpu-node.sh up 1` (MachineSet) | 불가. EC2 생성 + CSR 수동 승인 |
+| GPU / RHOAI | 이 랩의 본체 | 카탈로그 미러링이 선행이라 범위 밖 |
 
-`verify-agent-stack.sh`의 7번 검사는 두 레포에서 **기대값이 정반대**입니다.
-여기서는 파드가 `quay.io`에 닿아야 통과이고, 거기서는 닿지 않아야 통과입니다.
+**한쪽이 다른 쪽의 상위집합이 아닙니다.**
+GPU, RHOAI, LoRA 튜닝, Ray, MLflow는 여기서만 됩니다.
+미러링, PTR, 부트스트랩 ignition, 아티팩트 리포지토리는 저기서만 나옵니다.
+
+#### 템플릿을 같게 두려던 계획은 접었습니다
+
+한때 두 레포의 `manifests/**/*.yaml.tpl`을 바이트 단위로 같게 두고 차이를 `.env`에만 두려고 했습니다.
+그 목표는 폐기합니다. 두 스택의 목적이 갈라져서 유지할 수 없습니다.
+
+| | 여기 | ocp-airgap-lab |
+| --- | --- | --- |
+| 이미지 | `${IMAGE_QDRANT}` 같은 변수 | `${REGISTRY_HOST}:${REGISTRY_PORT}/qdrant/qdrant:v1.12.4` 를 그대로 |
+| StorageClass | `${STORAGE_CLASS}` | 지정하지 않고 기본값(`nfs`)에 맡김 |
+| 오프라인 스위치 | `AGENT_OFFLINE` 하나로 다섯 군데를 뒤집음 | **변수가 없음.** 항상 켜져 있음 |
+| SSO | Open WebUI / Phoenix에 oauth-proxy 사이드카 | 없음 |
+
+저쪽이 이미지 경로를 변수로 빼지 않는 건 아직 안 한 게 아니라 **의도된 결정**입니다.
+IDMS 리다이렉트에 기대지 않고 파드 spec을 눈으로 봐서 미러 경로를 확인하는 것이 그 랩의 목적입니다.
+
+`AGENT_OFFLINE`도 저쪽에는 있을 이유가 없습니다.
+**스위치는 끌 수 있는 쪽에만 의미가 있습니다.**
+끌 수 없는 환경에서는 그냥 항상 켜진 값이고, 변수로 두면 "꺼도 되나" 하는 오해만 생깁니다.
+
+차이는 이미 변수 몇 개 수준이 아닙니다.
+
+| 매니페스트 | 여기 | ocp-airgap-lab | 다른 줄 |
+| --- | --- | --- | --- |
+| `qdrant` | 109줄 | 111줄 | 14 |
+| `litellm` | 211줄 | 152줄 | 119 |
+| `open-webui` | 329줄 | 176줄 | 241 |
+| `phoenix` | 232줄 | 124줄 | 138 |
+
+여기가 큰 쪽인 이유는 oauth-proxy 사이드카입니다.
+[가이드](docs/guide/README.md)의 `2/2 Ready`가 그것입니다.
+
+#### 검사 번호는 서로 대응하지 않습니다
+
+양쪽 `verify-agent-stack.sh`의 번호가 같은 건 3번과 6번뿐이고, 그것도 우연입니다.
+
+| 여기 | ocp-airgap-lab |
+| --- | --- |
+| 3. 추론 루프 | 3. 추론 루프 |
+| 4. 벡터 DB 왕복 | 7. 벡터 DB 왕복 |
+| 6. 기동 시간 | 6. 기동 지연 |
+| **7. egress. 나가야 통과** | **2. 격리. 나가면 실패** |
+| 1. 파드 상태 / 2. PVC / 5. Route | 해당 없음 |
+| 해당 없음 | 1. 이미지 출처 / 4. 오프라인 스위치 / 5. 아티팩트 리포 |
+
+기대값이 정반대인 짝은 **여기 7번과 저기 2번**입니다.
+번호로 짝을 지으면 벡터 DB 왕복과 격리 검사를 비교하게 됩니다.
+
+#### 그래도 짝으로만 의미가 있는 것 하나
+
+[기준선 측정](#기준선-측정)의 6번은 양쪽에 다 있고, 한쪽만 재면 쓸모가 없습니다.
+여기서 잰 기동 시간이 대조군이고 폐쇄망에서 잰 값이 실험군입니다.
+대조군이 없으면 "원래 이 정도 걸리는 앱"인지 "폐쇄망이라 느린 것"인지 구분할 방법이 없습니다.
 
 ---
 
@@ -755,13 +807,13 @@ EC2 단가가 정확히 +22.9%, gp3가 +14%입니다.
 
 ### 비용을 줄이는 방법
 
-- ✅ **단일 AZ 사용** — NAT Gateway 3개 → 1개 (월 $65 절약)
-- ✅ **워커 노드 최소화** — 설치 절차 연습이 목적이면 `m6i.large` 2대로 충분
-- ✅ **루트 볼륨 120GB 유지** — 기본값 이상으로 키우지 않기
-- ✅ **`us-east-1` 사용** — 서울 대비 20% 저렴. 단 [리전 선택](#리전-선택)의 트레이드오프를 먼저 보세요
-- ✅ **GPU는 쓸 때만 붙이기** — `gpu-node.sh down`. 클러스터는 살려두고 시간당 $0.83만 끕니다
-- ❌ **EC2 stop만 하고 방치하지 않기** — NAT Gateway, NLB, EBS, EIP는 계속 과금됩니다
-- ❌ **io1/io2 볼륨 쓰지 않기** — gp3 대비 몇 배 비쌉니다
+- ✅ **단일 AZ 사용** - NAT Gateway 3개 → 1개 (월 $65 절약)
+- ✅ **워커 노드 최소화** - 설치 절차 연습이 목적이면 `m6i.large` 2대로 충분
+- ✅ **루트 볼륨 120GB 유지** - 기본값 이상으로 키우지 않기
+- ✅ **`us-east-1` 사용** - 서울 대비 20% 저렴. 단 [리전 선택](#리전-선택)의 트레이드오프를 먼저 보세요
+- ✅ **GPU는 쓸 때만 붙이기** - `gpu-node.sh down`. 클러스터는 살려두고 시간당 $0.83만 끕니다
+- ❌ **EC2 stop만 하고 방치하지 않기** - NAT Gateway, NLB, EBS, EIP는 계속 과금됩니다
+- ❌ **io1/io2 볼륨 쓰지 않기** - gp3 대비 몇 배 비쌉니다
 
 ---
 
@@ -1024,9 +1076,9 @@ oc logs -n ai-serving -l serving.kserve.io/inferenceservice=qwen2.5-1.5b --all-c
 
 자주 나오는 원인 세 가지입니다.
 
-- **Pending, 이벤트에 `untolerated taint`** — `gpu-node.sh`가 붙인 `nvidia.com/gpu` taint를 InferenceService가 toleration으로 안 받았습니다. 매니페스트에 들어 있으니 렌더링이 최신인지 확인하세요
-- **`storage initializer` 컨테이너에서 실패** — PVC에 가중치가 없습니다. `deploy-model.sh`의 다운로드 Job이 완료됐는지 보세요
-- **vLLM이 OOM** — `--gpu-memory-utilization` 값을 낮추세요. L4 24GB에 1.5B면 0.55로 충분합니다
+- **Pending, 이벤트에 `untolerated taint`** - `gpu-node.sh`가 붙인 `nvidia.com/gpu` taint를 InferenceService가 toleration으로 안 받았습니다. 매니페스트에 들어 있으니 렌더링이 최신인지 확인하세요
+- **`storage initializer` 컨테이너에서 실패** - PVC에 가중치가 없습니다. `deploy-model.sh`의 다운로드 Job이 완료됐는지 보세요
+- **vLLM이 OOM** - `--gpu-memory-utilization` 값을 낮추세요. L4 24GB에 1.5B면 0.55로 충분합니다
 
 </details>
 
@@ -1179,23 +1231,25 @@ ocp-aws-lab/
 
 ## 로드맵
 
-- [x] `preflight.sh` — 설치 전 쿼터·IAM·DNS 자동 점검
+- [x] `preflight.sh` - 설치 전 쿼터·IAM·DNS 자동 점검
 - [x] `ai` 프로파일 + `manifests/` + Day-2 스크립트 일습 작성
-- [x] **agent 스택 실제 검증** — 검사 7종 통과, CPU 추론 30 tok/s
-- [x] **GPU MachineSet 실제 검증** — 워커 MachineSet 복제로 g6.xlarge 생성
-- [x] **RHOAI 3.4.3 + KServe 서빙 실제 검증** — `alm-examples` 추출, vLLM 런타임 9개 중 CUDA 선택
-- [x] **클러스터 안 코딩 에이전트** — nvim/tmux/LazyVim + aider 가 내부 Service 로 GPU 모델 호출
-- [x] **IdP 연동** — htpasswd. `devuser` 로그인 확인. 폐쇄망에서도 외부 의존 없이 동작
-- [x] **LangGraph agent** — ReAct 그래프 + SQLite 체크포인터. 상태가 파드 재시작을 넘어 남음
-- [x] **Data Science Pipelines** — DSPA + MinIO + MariaDB. iris 샘플 Succeeded, MinIO 에 산출물 확인
-- [x] **SSO 통합** — Open WebUI / LangGraph 에 oauth-proxy. 인증 없이 열려 있던 구멍을 닫음
-- [x] **앱 런처 등록** — `ConsoleLink` 로 콘솔 격자 메뉴에 "AI 랩" 섹션. 별도 홈 화면을 만들지 않음
-- [x] **분산 컴포넌트 활성화** — `install-rhoai.sh distributed`. Ray / Kueue / TrainingOperator + cert-manager
-- [x] **MaaS·llm-d 실현 가능성 조사** — 결론은 불가. 이유는 [docs/maas-llm-d.md](docs/maas-llm-d.md)
-- [ ] **Keycloak(RHBK)** — htpasswd 다음 단계. OIDC 로 외부 IdP 연동
-- [ ] **파인튜닝(LoRA)** — GPU 1대에서는 서빙과 동시 불가. 순서를 나눠야 함
-- [ ] **Ray 분산 처리** — 헤드는 CPU, 워커에 GPU 1장
-- [ ] `--baseline` 측정값을 `ocp-airgap-lab`의 같은 검사와 나란히 기록
+- [x] **agent 스택 실제 검증** - 검사 7종 통과, CPU 추론 30 tok/s
+- [x] **GPU MachineSet 실제 검증** - 워커 MachineSet 복제로 g6.xlarge 생성
+- [x] **RHOAI 3.4.3 + KServe 서빙 실제 검증** - `alm-examples` 추출, vLLM 런타임 9개 중 CUDA 선택
+- [x] **클러스터 안 코딩 에이전트** - nvim/tmux/LazyVim + aider 가 내부 Service 로 GPU 모델 호출
+- [x] **IdP 연동** - htpasswd. `devuser` 로그인 확인. 폐쇄망에서도 외부 의존 없이 동작
+- [x] **LangGraph agent** - ReAct 그래프 + SQLite 체크포인터. 상태가 파드 재시작을 넘어 남음
+- [x] **Data Science Pipelines** - DSPA + MinIO + MariaDB. iris 샘플 Succeeded, MinIO 에 산출물 확인
+- [x] **SSO 통합** - Open WebUI / LangGraph 에 oauth-proxy. 인증 없이 열려 있던 구멍을 닫음
+- [x] **앱 런처 등록** - `ConsoleLink` 로 콘솔 격자 메뉴에 "AI 랩" 섹션. 별도 홈 화면을 만들지 않음
+- [x] **분산 컴포넌트 활성화** - `install-rhoai.sh distributed`. Ray / Kueue / TrainingOperator + cert-manager
+- [x] **MaaS·llm-d 실현 가능성 조사** - 결론은 불가. 이유는 [docs/maas-llm-d.md](docs/maas-llm-d.md)
+- [x] **파인튜닝(LoRA)** - PyTorchJob 으로 성공. 서빙을 먼저 내려 GPU 를 비우고 돌립니다. attention 만(r=16, 8ep, 0.44% param)은 문체만 배우고 사실은 틀렸고, MLP 를 넣어야(r=32, 40ep, 3.44% param, 94초) 세 문제 전부 맞았습니다
+- [x] **MLflow 연동** - RHOAI 3.4 MLflow 는 멀티테넌트라 Bearer 토큰과 `X-Mlflow-Workspace` 헤더가 둘 다 필요합니다
+- [x] **Ray 클러스터 기동** - `ray.sh up`. 헤드만(CPU) 올린 상태까지
+- [ ] **Ray 워커에 GPU 1장** - 서빙이 GPU 를 잡고 있으면 Pending 입니다. 튜닝과 같은 순서 문제입니다
+- [ ] **Keycloak(RHBK)** - htpasswd 다음 단계. OIDC 로 외부 IdP 연동
+- [ ] `--baseline` 측정값을 `ocp-airgap-lab` 의 6번 검사와 나란히 기록
 - [ ] RHOAI Data Science Pipelines 실습 (Elyra 파이프라인 1개)
 - [ ] TrustyAI와 Phoenix가 겹치는 부분 정리
 - [ ] Spot 인스턴스 GPU MachineSet (g6 spot은 온디맨드의 30~40%)
@@ -1210,14 +1264,14 @@ ocp-aws-lab/
 ### OpenShift
 
 - [OpenShift 설치 문서 (AWS)](https://docs.redhat.com/en/documentation/openshift_container_platform/latest/html/installing/installing-on-aws)
-- [openshift/installer — AWS 가이드](https://github.com/openshift/installer/blob/main/docs/user/aws/install.md)
+- [openshift/installer - AWS 가이드](https://github.com/openshift/installer/blob/main/docs/user/aws/install.md)
 - [OCP 4.22 릴리스 노트](https://docs.redhat.com/en/documentation/openshift_container_platform/4.22/html/release_notes/ocp-4-22-release-notes)
 - [OCP 60일 평가판](https://www.redhat.com/en/technologies/cloud-computing/openshift/ocp-self-managed-trial)
 - [OKD](https://www.okd.io/)
 
 ### OpenShift AI
 
-- [RHOAI 3.x 지원 구성 매트릭스](https://access.redhat.com/articles/rhoai-supported-configs-3.x) — OCP 4.22는 RHOAI **3.4**부터 지원됩니다
+- [RHOAI 3.x 지원 구성 매트릭스](https://access.redhat.com/articles/rhoai-supported-configs-3.x) - OCP 4.22는 RHOAI **3.4**부터 지원됩니다
 - [RHOAI Self-Managed 3.4 설치 문서](https://docs.redhat.com/en/documentation/red_hat_openshift_ai_self-managed/3.4/html/installing_and_uninstalling_openshift_ai_self-managed/installing-and-deploying-openshift-ai_install)
 - [NVIDIA GPU Operator on OpenShift](https://docs.nvidia.com/datacenter/cloud-native/openshift/latest/index.html)
 - [KServe](https://kserve.github.io/website/)
