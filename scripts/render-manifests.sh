@@ -172,6 +172,12 @@ if [[ -f "$CLUSTER_DIR/auth/kubeconfig" ]] \
     # 2. no matches for kind "..."
     #    50-rhoai 는 오퍼레이터를 깔기 전에는 CRD 가 없습니다. 아직 순서가 아닌 것뿐입니다.
     #
+    # 3. Warning: ... last-applied-configuration ...
+    #    install-rhoai.sh 가 ai-serving 네임스페이스를 oc create 로 만들기 때문에
+    #    그 어노테이션이 없습니다. oc 가 경고를 내지만 apply 는 정상 동작하고
+    #    다음 apply 때 알아서 채워집니다. 오류가 아니라 경고이고 stderr 로 나옵니다.
+    #    이걸 안 거르면 RHOAI 를 올린 뒤부터 이 검사가 항상 실패합니다.
+    #
     # 끝의 || true 가 필요합니다.
     # grep 은 걸러낼 게 없으면(= 오류가 전부 무해했으면) exit 1 을 냅니다.
     # set -e + pipefail 이라 그게 명령 치환 실패로 전파되어 스크립트가 죽습니다.
@@ -179,7 +185,8 @@ if [[ -f "$CLUSTER_DIR/auth/kubeconfig" ]] \
     ERR=$(oc apply --dry-run=server -R -f "$d" 2>&1 >/dev/null \
           | grep -v 'namespaces ".*" not found' \
           | grep -v 'no matches for kind' \
-          | grep -v 'ensure CRDs are installed' || true)
+          | grep -v 'ensure CRDs are installed' \
+          | grep -v '^Warning:' || true)
     if [[ -z "$ERR" ]]; then
       ok "서버 검증 통과  $(basename "$d")"
     else
